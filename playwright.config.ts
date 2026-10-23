@@ -17,7 +17,7 @@ export default defineConfig({
   // Always a fresh build on a dedicated port: never reuse a dev/preview server
   // that may be serving a stale bundle.
   webServer: {
-    command: 'npm run build && npx vite preview --port 4174 --strictPort',
+    command: 'npm run build:test && npx vite preview --config vite.test.config.ts --port 4174 --strictPort',
     url: 'http://localhost:4174',
     reuseExistingServer: false,
     timeout: 180_000,

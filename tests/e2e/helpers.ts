@@ -1,69 +1,79 @@
 import { expect, type Page } from '@playwright/test'
 
+export const APP = '/'
+/** takram's Clouds/Basic story on the real React stack (tests/reference/takram.tsx). */
+export const REF = '/tests/reference/takram.html'
+
 export interface OpenOptions {
-  params?: Record<string, string | number>
   width?: number
   height?: number
   frames?: number
+  ui?: boolean
 }
 
-/** Opens the app in deterministic test mode and waits for convergence. */
-export async function openApp(page: Page, opts: OpenOptions = {}): Promise<{ width: number; height: number }> {
-  const width = opts.width ?? 640
-  const height = opts.height ?? 360
+export async function open(
+  page: Page,
+  path: string,
+  params: Record<string, string | number> = {},
+  { width = 640, height = 360, frames = 120, ui = false }: OpenOptions = {},
+): Promise<void> {
   await page.setViewportSize({ width, height })
   const query = new URLSearchParams({
     test: '1',
+    frames: String(frames),
     size: `${width}x${height}`,
-    frames: String(opts.frames ?? 32),
-    seed: '1',
-    wind: '0',
-    ...Object.fromEntries(Object.entries(opts.params ?? {}).map(([k, v]) => [k, String(v)])),
+    ...(ui ? { ui: '1' } : {}),
+    ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
   })
-  const errors: string[] = []
-  page.on('pageerror', (e) => errors.push(e.message))
-  page.on('console', (m) => {
-    if (m.type() === 'error' && !m.text().includes('favicon')) errors.push(m.text())
-  })
-  await page.goto(`/?${query.toString()}`)
+  await page.goto(`${path}?${query}`)
   await page.waitForFunction(() => window.__earth?.ready === true, null, { timeout: 120_000 })
-  expect(errors, 'page errors').toEqual([])
-  return { width, height }
+  expect(await page.evaluate(() => window.__earth!.errors)).toEqual([])
 }
 
-/** Linear HDR rgba (kcd/m²) of a rect, top-left origin. */
-export async function readHdr(page: Page, x: number, y: number, w: number, h: number): Promise<Float32Array> {
-  const data = await page.evaluate(([a, b, c, d]) => window.__earth!.readHdr(a!, b!, c!, d!), [x, y, w, h])
-  return Float32Array.from(data)
+export const renderFrames = (page: Page, n: number) => page.evaluate((k) => window.__earth!.renderFrames(k), n)
+
+export async function readPixels(page: Page, x = 0, y = 0, w?: number, h?: number): Promise<number[]> {
+  return page.evaluate(
+    ([x0, y0, w0, h0]) => {
+      const e = window.__earth!
+      const size = e.size()
+      return e.readPixels(x0, y0, w0 ?? size.width, h0 ?? size.height)
+    },
+    [x, y, w, h] as const,
+  )
 }
 
-export async function renderFrames(page: Page, n: number): Promise<void> {
-  await page.evaluate((k) => window.__earth!.renderFrames(k), n)
+export interface DiffStats {
+  mean: number
+  max: number
+  /** Fraction of channel values that differ by more than `tolerance`. */
+  over: number
 }
 
-export function meanRgb(rgba: Float32Array): [number, number, number] {
-  let r = 0
-  let g = 0
-  let b = 0
-  const n = rgba.length / 4
-  for (let i = 0; i < rgba.length; i += 4) {
-    r += rgba[i]!
-    g += rgba[i + 1]!
-    b += rgba[i + 2]!
-  }
-  return [r / n, g / n, b / n]
-}
-
-export function countNonFinite(rgba: Float32Array): number {
+export function diff(a: number[], b: number[], tolerance = 4): DiffStats {
+  expect(a.length).toBe(b.length)
+  let sum = 0
+  let max = 0
+  let over = 0
   let n = 0
-  for (const v of rgba) if (!Number.isFinite(v)) n++
-  return n
+  for (let i = 0; i < a.length; i += 4) {
+    for (let c = 0; c < 3; ++c) {
+      const d = Math.abs(a[i + c]! - b[i + c]!)
+      sum += d
+      max = Math.max(max, d)
+      if (d > tolerance) over++
+      n++
+    }
+  }
+  return { mean: sum / n, max, over: over / n }
 }
 
-export function luminance([r, g, b]: [number, number, number]): number {
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
+/** Rec. 709 luma of 8-bit sRGB values (0–255). */
+export const luma = (p: number[], i: number) => 0.2126 * p[i]! + 0.7152 * p[i + 1]! + 0.0722 * p[i + 2]!
 
-export async function hdrStats(page: Page, x: number, y: number, w: number, h: number) {
-  return page.evaluate(([a, b, c, d]) => window.__earth!.hdrStats(a!, b!, c!, d!), [x, y, w, h])
+export type CameraState = Awaited<ReturnType<NonNullable<Window['__earth']>['camera']>>
+export const camera = (page: Page): Promise<CameraState> => page.evaluate(() => window.__earth!.camera())
+
+export function cameraDistance(c: CameraState): number {
+  return Math.hypot(c.position[0]! - c.target[0]!, c.position[1]! - c.target[1]!, c.position[2]! - c.target[2]!)
 }

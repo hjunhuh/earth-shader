@@ -13,20 +13,34 @@
     "test:e2e": "playwright test --project=metal",
     "test:e2e:ci": "playwright test --project=swiftshader",
     "bench": "playwright test --project=bench",
-    "test:all": "npm run typecheck && npm test && npm run test:gpu && npm run build && npm run test:e2e"
+    "test:all": "npm run typecheck && npm test && npm run test:gpu && npm run test:e2e",
+    "build:test": "vite build --config vite.test.config.ts"
   },
   "dependencies": {
+    "@takram/three-atmosphere": "0.19.1",
+    "@takram/three-clouds": "0.7.6",
+    "@takram/three-geospatial": "0.9.1",
+    "@takram/three-geospatial-effects": "0.6.4",
     "lil-gui": "0.21.0",
-    "three": "0.186.1"
+    "postprocessing": "6.39.1",
+    "three": "0.184.0",
+    "three-stdlib": "2.36.1"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
+    "@react-three/drei": "10.7.7",
+    "@react-three/fiber": "9.6.1",
+    "@react-three/postprocessing": "3.0.4",
     "@types/node": "^24.0.0",
-    "@types/three": "0.186.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/three": "0.184.0",
     "@vitest/browser-playwright": "5.0.5",
     "astronomy-engine": "^2.1.19",
     "fast-check": "4.10.2",
     "playwright": "1.64.1",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
     "typescript": "7.0.2",
     "vite": "^8.3.5",
     "vitest": "5.0.5"

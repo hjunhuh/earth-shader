@@ -1,95 +1,68 @@
-import { clampState, type GeoCameraState } from '../camera/pose'
 import {
-  DEFAULT_DATE,
-  DEFAULT_TIME_OF_DAY,
-  parseDateUtc,
-  setTimeOfDay,
-  timeOfDayAt,
-  utcForTimeOfDay,
-} from '../time/timeOfDay'
+  DATE_LIMITS,
+  DEFAULTS,
+  EXPOSURE_LIMITS,
+  LOCATION_LIMITS,
+  QUALITIES,
+  TONE_MAPPING_MODES,
+  type Quality,
+  type ToneMappingName,
+} from './defaults'
 
-export const QUALITIES = ['low', 'medium', 'high', 'ultra'] as const
-export type Quality = (typeof QUALITIES)[number]
-
-/** Synthetic weather used by measured tests. */
-export type WeatherOverride =
-  | { kind: 'procedural' }
-  | { kind: 'clear' }
-  | { kind: 'slab'; tau: number; bottom: number; top: number }
-  | { kind: 'blob'; lat: number; lon: number; bottom: number; top: number; radius: number }
-
-export interface CloudState {
-  enabled: boolean
-  quality: Quality
-  /** Global coverage multiplier (debug). */
-  coverage: number
-}
-
-export interface DebugState {
-  /** Manual EV100; null = deterministic auto curve. */
-  exposure: number | null
-  /** Weather drift speed [m/s]. */
-  wind: number
-  /** Disables non-physical terms (powder) for measured tests. */
-  physical: boolean
-  ozone: boolean
-  shadows: boolean
-  seed: number
-  weather: WeatherOverride
-}
-
+/**
+ * User-facing parameters. These are inputs only: camera interaction never
+ * writes back into them (the takram story behaves the same way).
+ */
 export interface AppState {
-  camera: GeoCameraState
-  /** Canonical clock (UTC ms). timeofday is derived from it. */
-  utcMs: number
-  cloud: CloudState
-  debug: DebugState
+  location: { longitude: number; latitude: number; altitude: number }
+  date: { dayOfYear: number; timeOfDay: number }
+  cloud: { enabled: boolean; quality: Quality; coverage: number; animate: boolean }
+  toneMapping: { mode: ToneMappingName; exposure: number }
+  atmosphere: { correctAltitude: boolean }
 }
 
-export const DEFAULT_CAMERA: GeoCameraState = {
-  lon: 126.978,
-  lat: 37.5665,
-  alt: 15_000_000,
-  heading: 0,
-  tilt: 0,
-}
+export type StatePatch = { [K in keyof AppState]?: Partial<AppState[K]> }
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+const finite = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
 
 export function createDefaultState(): AppState {
   return {
-    camera: { ...DEFAULT_CAMERA },
-    utcMs: utcForTimeOfDay(DEFAULT_TIME_OF_DAY, DEFAULT_CAMERA.lon, parseDateUtc(DEFAULT_DATE)),
-    cloud: { enabled: true, quality: 'high', coverage: 0.5 },
-    debug: {
-      exposure: null,
-      wind: 0,
-      physical: false,
-      ozone: true,
-      shadows: true,
-      seed: 1,
-      weather: { kind: 'procedural' },
-    },
+    location: { ...DEFAULTS.location },
+    date: { ...DEFAULTS.date },
+    cloud: { ...DEFAULTS.cloud },
+    toneMapping: { ...DEFAULTS.toneMapping },
+    atmosphere: { ...DEFAULTS.atmosphere },
   }
 }
 
-/** Displayed timeofday at the current camera longitude. */
-export function getTimeOfDay(state: AppState): number {
-  return timeOfDayAt(state.utcMs, state.camera.lon)
-}
-
-/** Editing timeofday moves the UTC instant (sun moves). */
-export function withTimeOfDay(state: AppState, tod: number): AppState {
-  const t = Math.min(24, Math.max(0, tod))
-  return { ...state, utcMs: setTimeOfDay(state.utcMs, state.camera.lon, t === 24 ? 0 : t) }
-}
-
-/** Moving the camera keeps the UTC instant (terminator fixed to the Earth). */
-export function withCamera(state: AppState, camera: GeoCameraState): AppState {
-  return { ...state, camera: clampState(camera) }
-}
-
-export function withCloud(state: AppState, cloud: Partial<CloudState>): AppState {
-  const next = { ...state.cloud, ...cloud }
-  if (!QUALITIES.includes(next.quality)) next.quality = 'high'
-  next.coverage = Math.min(1, Math.max(0, next.coverage))
-  return { ...state, cloud: next }
+/** Merge a patch and clamp every value to the panel's range. */
+export function applyPatch(state: AppState, patch: StatePatch): AppState {
+  const loc = { ...state.location, ...patch.location }
+  const date = { ...state.date, ...patch.date }
+  const cloud = { ...state.cloud, ...patch.cloud }
+  const tone = { ...state.toneMapping, ...patch.toneMapping }
+  const atmosphere = { ...state.atmosphere, ...patch.atmosphere }
+  return {
+    location: {
+      longitude: clamp(finite(loc.longitude, state.location.longitude), LOCATION_LIMITS.longitude.min, LOCATION_LIMITS.longitude.max),
+      latitude: clamp(finite(loc.latitude, state.location.latitude), LOCATION_LIMITS.latitude.min, LOCATION_LIMITS.latitude.max),
+      altitude: clamp(finite(loc.altitude, state.location.altitude), LOCATION_LIMITS.altitude.min, LOCATION_LIMITS.altitude.max),
+    },
+    date: {
+      dayOfYear: clamp(finite(date.dayOfYear, state.date.dayOfYear), DATE_LIMITS.dayOfYear.min, DATE_LIMITS.dayOfYear.max),
+      timeOfDay: clamp(finite(date.timeOfDay, state.date.timeOfDay), DATE_LIMITS.timeOfDay.min, DATE_LIMITS.timeOfDay.max),
+    },
+    cloud: {
+      enabled: Boolean(cloud.enabled),
+      quality: (QUALITIES as readonly string[]).includes(cloud.quality) ? cloud.quality : state.cloud.quality,
+      coverage: clamp(finite(cloud.coverage, state.cloud.coverage), 0, 1),
+      animate: Boolean(cloud.animate),
+    },
+    toneMapping: {
+      mode: (TONE_MAPPING_MODES as readonly string[]).includes(tone.mode) ? tone.mode : state.toneMapping.mode,
+      exposure: clamp(finite(tone.exposure, state.toneMapping.exposure), EXPOSURE_LIMITS.min, EXPOSURE_LIMITS.max),
+    },
+    atmosphere: { correctAltitude: Boolean(atmosphere.correctAltitude) },
+  }
 }

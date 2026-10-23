@@ -9,3 +9,5 @@ bench-results
 __screenshots__/*.actual.png
 tests/e2e/__golden__/*.actual.png
 .DS_Store
+.backup/
+dist-test

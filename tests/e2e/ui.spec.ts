@@ -1,48 +1,103 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openApp, renderFrames } from './helpers'
+import { Geodetic, radians } from '@takram/three-geospatial'
+import { APP, camera, open, renderFrames } from './helpers'
 
-/** Drives the real lil-gui panel (location / date / cloud) and checks two-way binding. */
-const controller = (page: Page, label: string) =>
-  page.locator('.lil-controller', { has: page.locator('.lil-name', { hasText: new RegExp(`^${label}`) }) })
+// lil-gui 0.21: folder = div.lil-gui > button.lil-title + div.lil-children > div.lil-controller > div.lil-name
+const controller = (page: Page, folder: string, name: string) =>
+  page
+    .locator('.lil-gui', { has: page.locator(':scope > .lil-title', { hasText: new RegExp(`^${folder}$`) }) })
+    .locator('.lil-controller', { has: page.locator('.lil-name', { hasText: new RegExp(`^${name}$`) }) })
 
-async function setNumber(page: Page, label: string, value: number) {
-  const input = controller(page, label).locator('input').last()
+async function setNumber(page: Page, folder: string, name: string, value: number) {
+  const input = controller(page, folder, name).locator('input').first()
   await input.fill(String(value))
   await input.press('Enter')
-  await renderFrames(page, 2)
 }
 
-test.describe('UI panel', () => {
-  test('exposes the required controls: location{long, lat, altitude}, date{timeofday}, cloud{enabled, quality}', async ({ page }) => {
-    await openApp(page, { params: { ui: 1 } })
-    for (const folder of ['location', 'date', 'cloud']) await expect(page.locator('.lil-title', { hasText: folder }).first()).toBeVisible()
-    for (const name of ['long', 'lat', 'altitude', 'timeofday', 'enabled', 'quality']) await expect(controller(page, name)).toHaveCount(1)
-    await expect(controller(page, 'timeofday').locator('input').last()).toHaveValue('8')
+const numberValue = async (page: Page, folder: string, name: string) =>
+  Number(await controller(page, folder, name).locator('input').first().inputValue())
+
+test.describe('control panel', () => {
+  test('has the required controls', async ({ page }) => {
+    await open(page, APP, {}, { frames: 1, ui: true })
+    for (const [folder, names] of [
+      ['location', ['longitude', 'latitude', 'altitude']],
+      ['date', ['timeOfDay', 'dayOfYear']],
+      ['cloud', ['enabled', 'quality', 'coverage', 'animate']],
+    ] as const) {
+      for (const name of names) await expect(controller(page, folder, name)).toHaveCount(1)
+    }
+    expect(await numberValue(page, 'date', 'timeOfDay')).toBe(8)
+    expect(await numberValue(page, 'location', 'longitude')).toBe(30)
   })
 
-  test('editing the controls drives the app state', async ({ page }) => {
-    await openApp(page, { params: { ui: 1 } })
-    await setNumber(page, 'timeofday', 17.5)
-    expect((await page.evaluate(() => window.__earth!.getState())).timeOfDay).toBeCloseTo(17.5, 2)
-    await setNumber(page, 'long', 10)
-    await setNumber(page, 'lat', -20)
-    await setNumber(page, 'altitude', 5000)
-    const cam = (await page.evaluate(() => window.__earth!.getState())).camera
-    expect(cam.lon).toBeCloseTo(10, 3)
-    expect(cam.lat).toBeCloseTo(-20, 3)
-    expect(cam.alt).toBeCloseTo(5000, 0)
-    await controller(page, 'enabled').locator('input').uncheck()
-    expect((await page.evaluate(() => window.__earth!.getState())).cloud.enabled).toBe(false)
-    await controller(page, 'quality').locator('select').selectOption('low')
-    expect((await page.evaluate(() => window.__earth!.getState())).cloud.quality).toBe('low')
+  test('timeOfDay edits move the sun; location edits move the orbit target there', async ({ page }) => {
+    await open(page, APP, {}, { frames: 1, ui: true })
+    const sun0 = await page.evaluate(() => window.__earth!.sunDirection())
+    await setNumber(page, 'date', 'timeOfDay', 15)
+    await renderFrames(page, 1)
+    expect((await page.evaluate(() => window.__earth!.getState!())).date.timeOfDay).toBe(15)
+    const sun1 = await page.evaluate(() => window.__earth!.sunDirection())
+    expect(Math.hypot(...sun1.map((v, i) => v - sun0[i]!))).toBeGreaterThan(0.5)
+
+    await setNumber(page, 'location', 'longitude', 127)
+    await setNumber(page, 'location', 'latitude', 37.5)
+    await renderFrames(page, 1)
+    const c = await camera(page)
+    const want = new Geodetic(radians(127), radians(37.5), 300).toECEF()
+    expect(Math.hypot(c.target[0]! - want.x, c.target[1]! - want.y, c.target[2]! - want.z)).toBeLessThan(1e-3)
   })
 
-  test('moving the camera updates the panel; the sun stays fixed to the Earth', async ({ page }) => {
-    await openApp(page, { params: { ui: 1, lon: 0, lat: 0, alt: 2_000_000, tod: 12 } })
-    await page.evaluate(() => window.__earth!.setCamera({ lon: 30 }))
-    await page.evaluate(() => window.__earth!.syncUi())
-    await expect(controller(page, 'long').locator('input').last()).toHaveValue('30')
-    // 30° east of local noon is 14:00 local solar time.
-    await expect(controller(page, 'timeofday').locator('input').last()).toHaveValue('14')
+  test('dragging and zooming the view leaves every panel value unchanged', async ({ page }) => {
+    await open(page, APP, {}, { frames: 1, ui: true })
+    const snapshot = () => page.locator('.lil-gui input').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).type === 'checkbox' ? String((e as HTMLInputElement).checked) : (e as HTMLInputElement).value))
+    const before = await snapshot()
+    await page.mouse.move(60, 250)
+    await page.mouse.down()
+    for (let i = 0; i < 10; ++i) {
+      await page.mouse.move(60 + i * 12, 250 - i * 5)
+      await renderFrames(page, 1)
+    }
+    await page.mouse.up()
+    for (let i = 0; i < 10; ++i) {
+      await page.mouse.wheel(0, 100)
+      await renderFrames(page, 1)
+    }
+    await renderFrames(page, 60)
+    expect(await snapshot()).toEqual(before)
+  })
+})
+
+test.describe('normal mode (no test hooks)', () => {
+  test('boots, animates with the real clock, shows the panel and the sun; no errors', async ({ page }) => {
+    const errors: string[] = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    page.on('console', (m) => {
+      if (m.type() === 'error') errors.push(m.text())
+    })
+    await page.setViewportSize({ width: 960, height: 540 })
+    await page.goto('/')
+    await expect(controller(page, 'date', 'timeOfDay')).toHaveCount(1)
+    expect(await page.evaluate(() => window.__earth)).toBeUndefined()
+    // Wait for the LUTs and textures, then check a lit frame via a screenshot.
+    await page.waitForTimeout(6000)
+    const shot = await page.locator('canvas').screenshot({ path: test.info().outputPath('normal-mode.png') })
+    const stats = await page.evaluate(async (b64) => {
+      const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/png' }))
+      const c = new OffscreenCanvas(bmp.width, bmp.height)
+      const ctx = c.getContext('2d')!
+      ctx.drawImage(bmp, 0, 0)
+      const d = ctx.getImageData(0, 0, bmp.width, bmp.height).data
+      let sum = 0
+      let saturated = 0
+      for (let i = 0; i < d.length; i += 4) {
+        sum += d[i]! + d[i + 1]! + d[i + 2]!
+        if (d[i]! > 250 && d[i + 1]! > 250 && d[i + 2]! > 250) saturated++
+      }
+      return { mean: sum / (d.length / 4) / 3, saturated }
+    }, shot.toString('base64'))
+    expect(stats.mean).toBeGreaterThan(60) // lit sky and ocean
+    expect(stats.saturated).toBeGreaterThanOrEqual(3) // the sun disk: 0.53° ≈ 4 px across at 540 px / 75°
+    expect(errors).toEqual([])
   })
 })
