@@ -4,7 +4,9 @@ import { APP, diff, open, readPixels, REF, renderFrames } from './helpers'
 /**
  * The rendering must be takram's: every scene is rendered by the app and by
  * the takram reference page (Clouds/Basic on R3F + drei + postprocessing)
- * with identical inputs, and the final 8-bit frames are compared.
+ * with identical inputs, and the final 8-bit frames are compared. The app runs
+ * with `sun=takram` (takram's own sun disk) because its realistic sun is the
+ * one intentional difference; sun.spec.ts measures that one.
  */
 interface Scene {
   params: Record<string, string | number>
@@ -30,7 +32,8 @@ const SCENES: Record<string, Scene> = {
 async function render(browser: Browser, path: string, scene: Scene): Promise<number[]> {
   const page = await browser.newPage()
   try {
-    await open(page, path, scene.params, { frames: scene.pov ? 0 : 120 })
+    // The app's realistic sun is its one intended difference; compare with takram's disk.
+    await open(page, path, { sun: 'takram', ...scene.params }, { frames: scene.pov ? 0 : 120 })
     if (scene.pov) {
       await page.evaluate((p) => window.__earth!.setPointOfView(...p), scene.pov)
       await renderFrames(page, 120)

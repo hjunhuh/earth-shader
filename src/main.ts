@@ -47,6 +47,7 @@ if (parsed.test.enabled) {
   api.getState = () => structuredClone(app.state)
   api.setState = (patch) => app.set(patch)
   window.__earth = api
+  ;(window as unknown as { __earthApp: EarthApp }).__earthApp = app // internals, for debugging probes
   scene.ready
     .then(() => {
       app.renderFrames(parsed.test.frames)

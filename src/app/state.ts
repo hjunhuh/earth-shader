@@ -2,10 +2,14 @@ import {
   DATE_LIMITS,
   DEFAULTS,
   EXPOSURE_LIMITS,
+  CORONA_LIMITS,
+  GLARE_LIMITS,
   LOCATION_LIMITS,
   QUALITIES,
+  SUN_MODELS,
   TONE_MAPPING_MODES,
   type Quality,
+  type SunModel,
   type ToneMappingName,
 } from './defaults'
 
@@ -17,6 +21,7 @@ export interface AppState {
   location: { longitude: number; latitude: number; altitude: number }
   date: { dayOfYear: number; timeOfDay: number }
   cloud: { enabled: boolean; quality: Quality; coverage: number; animate: boolean }
+  sun: { model: SunModel; glare: number; corona: number }
   toneMapping: { mode: ToneMappingName; exposure: number }
   atmosphere: { correctAltitude: boolean }
 }
@@ -31,6 +36,7 @@ export function createDefaultState(): AppState {
     location: { ...DEFAULTS.location },
     date: { ...DEFAULTS.date },
     cloud: { ...DEFAULTS.cloud },
+    sun: { ...DEFAULTS.sun },
     toneMapping: { ...DEFAULTS.toneMapping },
     atmosphere: { ...DEFAULTS.atmosphere },
   }
@@ -41,6 +47,7 @@ export function applyPatch(state: AppState, patch: StatePatch): AppState {
   const loc = { ...state.location, ...patch.location }
   const date = { ...state.date, ...patch.date }
   const cloud = { ...state.cloud, ...patch.cloud }
+  const sun = { ...state.sun, ...patch.sun }
   const tone = { ...state.toneMapping, ...patch.toneMapping }
   const atmosphere = { ...state.atmosphere, ...patch.atmosphere }
   return {
@@ -58,6 +65,11 @@ export function applyPatch(state: AppState, patch: StatePatch): AppState {
       quality: (QUALITIES as readonly string[]).includes(cloud.quality) ? cloud.quality : state.cloud.quality,
       coverage: clamp(finite(cloud.coverage, state.cloud.coverage), 0, 1),
       animate: Boolean(cloud.animate),
+    },
+    sun: {
+      model: (SUN_MODELS as readonly string[]).includes(sun.model) ? sun.model : state.sun.model,
+      glare: clamp(finite(sun.glare, state.sun.glare), GLARE_LIMITS.min, GLARE_LIMITS.max),
+      corona: clamp(finite(sun.corona, state.sun.corona), CORONA_LIMITS.min, CORONA_LIMITS.max),
     },
     toneMapping: {
       mode: (TONE_MAPPING_MODES as readonly string[]).includes(tone.mode) ? tone.mode : state.toneMapping.mode,

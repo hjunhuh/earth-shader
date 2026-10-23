@@ -2,8 +2,11 @@ import GUI from 'lil-gui'
 import {
   DATE_LIMITS,
   EXPOSURE_LIMITS,
+  CORONA_LIMITS,
+  GLARE_LIMITS,
   LOCATION_LIMITS,
   QUALITIES,
+  SUN_MODELS,
   TONE_MAPPING_MODES,
 } from './defaults'
 import type { AppState, StatePatch } from './state'
@@ -41,6 +44,11 @@ export class ControlPanel {
     cloud.add(m.cloud, 'coverage', 0, 1, 0.01).onChange(() => onChange({ cloud: { coverage: m.cloud.coverage } }))
     cloud.add(m.cloud, 'animate').onChange(() => onChange({ cloud: { animate: m.cloud.animate } }))
 
+    const sun = this.gui.addFolder('sun').close()
+    sun.add(m.sun, 'model', [...SUN_MODELS]).onChange(() => onChange({ sun: { model: m.sun.model } }))
+    sun.add(m.sun, 'glare', GLARE_LIMITS.min, GLARE_LIMITS.max, 0.01).onChange(() => onChange({ sun: { glare: m.sun.glare } }))
+    sun.add(m.sun, 'corona', CORONA_LIMITS.min, CORONA_LIMITS.max, 0.01).onChange(() => onChange({ sun: { corona: m.sun.corona } }))
+
     const tone = this.gui.addFolder('tone mapping').close()
     tone.add(m.toneMapping, 'mode', [...TONE_MAPPING_MODES]).onChange(() => onChange({ toneMapping: { mode: m.toneMapping.mode } }))
     tone.add(m.toneMapping, 'exposure', EXPOSURE_LIMITS.min, EXPOSURE_LIMITS.max)
@@ -56,6 +64,7 @@ export class ControlPanel {
     Object.assign(this.model.location, state.location)
     Object.assign(this.model.date, state.date)
     Object.assign(this.model.cloud, state.cloud)
+    Object.assign(this.model.sun, state.sun)
     Object.assign(this.model.toneMapping, state.toneMapping)
     Object.assign(this.model.atmosphere, state.atmosphere)
     for (const c of this.gui.controllersRecursive()) c.updateDisplay()

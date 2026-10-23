@@ -8,6 +8,7 @@ describe('state', () => {
       location: { longitude: 30, latitude: 35, altitude: 300 },
       date: { dayOfYear: 1, timeOfDay: 8 },
       cloud: { enabled: true, quality: 'high', coverage: 0.3, animate: false },
+      sun: { model: 'realistic', glare: 0.1, corona: 0.5 },
       toneMapping: { mode: 'AgX', exposure: 10 },
       atmosphere: { correctAltitude: true },
     })
@@ -58,6 +59,7 @@ describe('URL', () => {
       frames: 64,
       size: { width: 640, height: 360 },
       ui: true,
+      dpr: 1,
     })
     expect(parseUrl('').test.enabled).toBe(false)
   })

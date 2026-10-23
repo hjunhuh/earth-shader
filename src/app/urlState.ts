@@ -1,4 +1,4 @@
-import { QUALITIES, TONE_MAPPING_MODES, type Quality, type ToneMappingName } from './defaults'
+import { QUALITIES, SUN_MODELS, TONE_MAPPING_MODES, type Quality, type SunModel, type ToneMappingName } from './defaults'
 import { applyPatch, createDefaultState, type AppState, type StatePatch } from './state'
 
 export interface TestConfig {
@@ -8,6 +8,8 @@ export interface TestConfig {
   size: { width: number; height: number } | null
   /** Show the panel in test mode. */
   ui: boolean
+  /** Pixel ratio in test mode. */
+  dpr: number
 }
 
 export interface ParsedUrl {
@@ -40,12 +42,14 @@ function prune<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T
 }
 
-/** `?lon=&lat=&alt=&doy=&tod=&clouds=&quality=&coverage=&exposure=` plus test flags. */
+/** `?lon=&lat=&alt=&doy=&tod=&clouds=&quality=&coverage=&sun=&glare=&exposure=` plus test flags. */
 export function parseUrl(search: string): ParsedUrl {
   const params = new URLSearchParams(search)
   const errors: string[] = []
   const quality = params.get('quality')
   if (quality !== null && !(QUALITIES as readonly string[]).includes(quality)) errors.push(`quality: unknown "${quality}"`)
+  const sunModel = params.get('sun')
+  if (sunModel !== null && !(SUN_MODELS as readonly string[]).includes(sunModel)) errors.push(`sun: unknown "${sunModel}"`)
   const tone = params.get('tonemapping')
   if (tone !== null && !(TONE_MAPPING_MODES as readonly string[]).includes(tone)) errors.push(`tonemapping: unknown "${tone}"`)
 
@@ -61,6 +65,11 @@ export function parseUrl(search: string): ParsedUrl {
       quality: quality !== null && (QUALITIES as readonly string[]).includes(quality) ? (quality as Quality) : undefined,
       coverage: number(params, 'coverage', errors),
       animate: flag(params, 'animate', errors),
+    }),
+    sun: prune({
+      model: sunModel !== null && (SUN_MODELS as readonly string[]).includes(sunModel) ? (sunModel as SunModel) : undefined,
+      glare: number(params, 'glare', errors),
+      corona: number(params, 'corona', errors),
     }),
     toneMapping: prune({
       exposure: number(params, 'exposure', errors),
@@ -82,6 +91,7 @@ export function parseUrl(search: string): ParsedUrl {
     frames: Math.max(0, Math.floor(number(params, 'frames', errors) ?? 8)),
     size,
     ui: params.get('ui') === '1',
+    dpr: Math.min(4, Math.max(0.25, number(params, 'dpr', errors) ?? 1)),
   }
   return { state, test, errors }
 }

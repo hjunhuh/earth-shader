@@ -185,7 +185,7 @@ createRoot(document.getElementById('root')!).render(
   <Canvas
     gl={{ depth: false, preserveDrawingBuffer: true }}
     camera={{ near: 1, far: 4e5 }}
-    dpr={1}
+    dpr={test.dpr}
     frameloop="never"
     style={test.size ? { width: test.size.width, height: test.size.height } : { width: '100vw', height: '100vh' }}
   >

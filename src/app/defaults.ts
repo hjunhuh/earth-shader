@@ -7,6 +7,12 @@
 export const QUALITIES = ['low', 'medium', 'high', 'ultra'] as const
 export type Quality = (typeof QUALITIES)[number]
 
+/** 'realistic': area-integrated limb-darkened disk + physically based glare. 'takram': takram's own sky disk. */
+export const SUN_MODELS = ['realistic', 'takram'] as const
+export type SunModel = (typeof SUN_MODELS)[number]
+export const GLARE_LIMITS = { min: 0, max: 1.5 } as const
+export const CORONA_LIMITS = { min: 0, max: 1 } as const
+
 export const TONE_MAPPING_MODES = ['AgX', 'Reinhard', 'Cineon', 'ACES Filmic', 'Linear'] as const
 export type ToneMappingName = (typeof TONE_MAPPING_MODES)[number]
 
@@ -31,6 +37,7 @@ export const DEFAULTS = {
   location: { longitude: 30, latitude: 35, altitude: 300 },
   date: { dayOfYear: 1, timeOfDay: 8 },
   cloud: { enabled: true, quality: 'high' as Quality, coverage: 0.3, animate: false },
+  sun: { model: 'realistic' as SunModel, glare: 0.1, corona: 0.5 },
   toneMapping: { mode: 'AgX' as ToneMappingName, exposure: 10 },
   atmosphere: { correctAltitude: true },
 } as const

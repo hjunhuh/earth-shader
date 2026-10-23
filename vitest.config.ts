@@ -19,7 +19,7 @@ export default defineConfig({
       },
       {
         define: { 'import.meta.env.CI': JSON.stringify(Boolean(process.env.CI)) },
-        optimizeDeps: { include: ['three', 'fast-check', '@takram/three-geospatial', 'postprocessing'] },
+        optimizeDeps: { include: ['three', 'fast-check', '@takram/three-geospatial', '@takram/three-atmosphere', 'postprocessing'] },
         test: {
           name: 'gpu',
           include: ['tests/gpu/**/*.gpu.test.ts'],

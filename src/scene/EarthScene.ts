@@ -31,6 +31,7 @@ import { Ocean } from './Ocean'
 import { clipPlanes } from './oceanMath'
 import { groupEffects } from './passes'
 import { applySpaceViewFix } from './spaceViewFix'
+import { SunEffect } from './SunEffect'
 
 export const TONE_MAPPING: Record<ToneMappingName, ToneMappingMode> = {
   AgX: ToneMappingMode.AGX,
@@ -43,8 +44,10 @@ export const TONE_MAPPING: Record<ToneMappingName, ToneMappingMode> = {
 export interface EarthSceneOptions {
   canvas: HTMLCanvasElement
   state: AppState
-  /** Deterministic test mode: pixel ratio 1, springs jump, readable canvas. */
+  /** Deterministic test mode: springs jump, readable canvas. */
   test?: boolean
+  /** Device pixel ratio; defaults to min(devicePixelRatio, 2) like R3F (1 in test mode). */
+  pixelRatio?: number
 }
 
 /**
@@ -67,6 +70,7 @@ export class EarthScene {
   readonly composer: EffectComposer
   readonly generator: PrecomputedTexturesGenerator
   readonly aerialPerspective: AerialPerspectiveEffect
+  readonly sun: SunEffect
   readonly lensFlare = new LensFlareEffect()
   readonly toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.AGX })
   readonly smaa = new SMAAEffect()
@@ -86,13 +90,14 @@ export class EarthScene {
   private assets: CloudAssets | null = null
   private effectPasses: EffectPass[] = []
   private appliedQuality: Quality | null = null
+  private appliedSunModel: AppState['sun']['model'] | null = null
   private disposed = false
 
   /** Resolves when the atmosphere LUTs and cloud textures are ready. */
   readonly ready: Promise<void>
   frame = 0
 
-  constructor({ canvas, state, test = false }: EarthSceneOptions) {
+  constructor({ canvas, state, test = false, pixelRatio }: EarthSceneOptions) {
     this.state = state
     this.test = test
 
@@ -105,7 +110,7 @@ export class EarthScene {
       powerPreference: 'high-performance',
       preserveDrawingBuffer: test,
     })
-    this.renderer.setPixelRatio(test ? 1 : Math.min(window.devicePixelRatio, 2))
+    this.renderer.setPixelRatio(pixelRatio ?? (test ? 1 : Math.min(window.devicePixelRatio, 2)))
     this.renderer.toneMapping = NoToneMapping // Set by @react-three/postprocessing.
 
     this.camera = new PerspectiveCamera(CAMERA.fov, 1, CAMERA.near, CAMERA.far)
@@ -133,6 +138,13 @@ export class EarthScene {
         correctAltitude: state.atmosphere.correctAltitude,
       }),
     )
+
+    this.sun = new SunEffect(this.camera, {
+      glare: state.sun.glare,
+      corona: state.sun.corona,
+      correctAltitude: state.atmosphere.correctAltitude,
+    })
+    this.sun.transmittanceTexture = this.generator.textures.transmittanceTexture
 
     this.exposure = new Spring(state.toneMapping.exposure)
     this.dayOfYear = new Spring(state.date.dayOfYear)
@@ -186,6 +198,13 @@ export class EarthScene {
     }
     this.toneMapping.mode = TONE_MAPPING[toneMapping.mode]
     this.aerialPerspective.correctAltitude = state.atmosphere.correctAltitude
+    this.sun.correctAltitude = state.atmosphere.correctAltitude
+    this.sun.glare = state.sun.glare
+    this.sun.corona = state.sun.corona
+    // The realistic sun replaces takram's sky disk.
+    this.aerialPerspective.sun = state.sun.model === 'takram'
+    const sunModelChanged = this.appliedSunModel !== state.sun.model
+    this.appliedSunModel = state.sun.model
 
     // Toggling clouds remounts the effect in the story (new instance, fresh history).
     if (cloud.enabled && this.clouds == null) {
@@ -199,7 +218,7 @@ export class EarthScene {
       this.aerialPerspective.shadow = null
       this.aerialPerspective.shadowLength = null
       this.rebuildPasses()
-    } else if (initial) {
+    } else if (initial || sunModelChanged) {
       this.rebuildPasses()
     }
     if (this.clouds) {
@@ -257,6 +276,7 @@ export class EarthScene {
     const effects: Effect[] = [
       ...(this.clouds ? [this.clouds] : []),
       this.aerialPerspective,
+      ...(this.state.sun.model === 'realistic' ? [this.sun] : []),
       this.lensFlare,
       this.toneMapping,
       this.smaa,
@@ -333,6 +353,8 @@ export class EarthScene {
       this.clouds.sunDirection.copy(this.sunDirection)
       this.clouds.worldToECEFMatrix.copy(this.worldToECEF)
     }
+    this.sun.sunDirection.copy(this.sunDirection)
+    this.sun.overlayMap = this.clouds?.atmosphereOverlay?.map ?? null
     this.renderer.toneMappingExposure = exposure
 
     this.ocean.update(this.camera)
@@ -344,6 +366,7 @@ export class EarthScene {
     this.disposed = true
     this.controls.dispose()
     this.clouds?.dispose()
+    this.sun.dispose()
     this.composer.dispose()
     this.generator.dispose()
     this.renderer.dispose()

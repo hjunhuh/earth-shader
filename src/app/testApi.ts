@@ -25,10 +25,11 @@ export interface EarthTestApi {
   sunDirection(): number[]
   /** Sun position in CSS pixels (top-left origin); inFront is false when behind the camera. */
   projectSun(): { x: number; y: number; inFront: boolean }
-  /** RGBA8 of the last frame, top-left origin, CSS-pixel rectangle (pixel ratio 1). */
+  /** RGBA8 of the last frame, top-left origin. The rectangle is in CSS pixels; the result has (w·dpr)×(h·dpr) pixels. */
   readPixels(x: number, y: number, w: number, h: number): number[]
   exposure(): number
   dateMs(): number
+  pixelRatio(): number
   getState?(): AppState
   setState?(patch: StatePatch): void
 }
@@ -84,8 +85,10 @@ export function createTestApi(t: TestTarget, errors: string[]): EarthTestApi {
       const { width, height } = this.size()
       return { x: (ndc.x * 0.5 + 0.5) * width, y: (0.5 - ndc.y * 0.5) * height, inFront }
     },
-    readPixels(x, y, w, h) {
+    readPixels(x0, y0, w0, h0) {
       const gl = t.gl.getContext()
+      const pr = t.gl.getPixelRatio()
+      const [x, y, w, h] = [x0, y0, w0, h0].map((v) => Math.round(v * pr)) as [number, number, number, number]
       const buffer = new Uint8Array(w * h * 4)
       const height = gl.drawingBufferHeight
       gl.bindFramebuffer(gl.FRAMEBUFFER, null)
@@ -103,6 +106,9 @@ export function createTestApi(t: TestTarget, errors: string[]): EarthTestApi {
     },
     dateMs() {
       return t.dateMs()
+    },
+    pixelRatio() {
+      return t.gl.getPixelRatio()
     },
   }
 }

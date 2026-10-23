@@ -28,7 +28,7 @@ export class EarthApp {
       canvas.style.width = `${test.size.width}px`
       canvas.style.height = `${test.size.height}px`
     }
-    this.scene = new EarthScene({ canvas, state, test: test.enabled })
+    this.scene = new EarthScene({ canvas, state, test: test.enabled, ...(test.enabled ? { pixelRatio: test.dpr } : {}) })
     this.panel = uiContainer ? new ControlPanel(uiContainer, state, (patch) => this.update(patch)) : null
     this.resize()
     this.resizeObserver = new ResizeObserver(() => this.resize())
