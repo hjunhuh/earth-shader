@@ -1,0 +1,35 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #ddd;
+  font-family: system-ui, sans-serif;
+}
+#earth {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: grab;
+}
+#earth:active {
+  cursor: grabbing;
+}
+#ui {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+}
+#error {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #000;
+  color: #f88;
+  font-size: 18px;
+}
+#error[hidden] {
+  display: none;
+}

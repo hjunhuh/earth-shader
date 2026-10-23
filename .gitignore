@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+test-results
+playwright-report
+bench-results
+.vitest-attachments
+.vitest/
+__screenshots__/*.actual.png
+tests/e2e/__golden__/*.actual.png
+.DS_Store
