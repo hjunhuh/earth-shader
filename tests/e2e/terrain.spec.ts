@@ -1,95 +1,10 @@
-import { crc32, deflateSync } from 'node:zlib'
 import { expect, test, type Browser, type Page } from '@playwright/test'
 import { Geodetic } from '@takram/three-geospatial'
 import { Vector3 } from 'three'
 import { APP, diff, luma, open, readPixels, renderFrames } from './helpers'
+import { MOUNTAIN, PLAIN, routeTiles, worldHeight, type Requests } from './tiles'
 
-/**
- * The terrain with local stand-ins for the OSM and Terrarium servers (never the
- * real ones: deterministic, and the OSM tile policy forbids automated bulk
- * fetching). The synthetic world: a steep Gaussian mountain at 10°E 45°N on a 100 m
- * plain, sea 1000 m deep west of 9.5°E, OSM land/water colors to match.
- */
-const MOUNTAIN = { lon: 10, lat: 45, height: 3000, sigma: 0.03 } // ~3.3 km: slopes up to ~30°
-const PLAIN = 100
-const COAST_LON = 9.5
-const LAND = [0xf2, 0xef, 0xe9]
-const WATER = [0xaa, 0xd3, 0xdf]
-
-function worldHeight(lon: number, lat: number): number {
-  if (lon < COAST_LON) return -1000
-  const dx = (lon - MOUNTAIN.lon) * Math.cos((MOUNTAIN.lat * Math.PI) / 180)
-  const dy = lat - MOUNTAIN.lat
-  return PLAIN + MOUNTAIN.height * Math.exp(-(dx * dx + dy * dy) / (2 * MOUNTAIN.sigma ** 2))
-}
-
-/** Pixel center of a 256-px Web Mercator tile → lon/lat in degrees. */
-function pixelLonLat(z: number, x: number, y: number, px: number, py: number): [number, number] {
-  const n = 2 ** z
-  const lon = ((x + (px + 0.5) / 256) / n) * 360 - 180
-  const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + (py + 0.5) / 256)) / n))) * 180) / Math.PI
-  return [lon, lat]
-}
-
-function png(width: number, height: number, rgb: (px: number, py: number) => number[]): Buffer {
-  const raw = Buffer.alloc((width * 3 + 1) * height)
-  for (let py = 0; py < height; ++py) {
-    raw[py * (width * 3 + 1)] = 0 // filter: none
-    for (let px = 0; px < width; ++px) raw.set(rgb(px, py), py * (width * 3 + 1) + 1 + px * 3)
-  }
-  const chunk = (type: string, data: Buffer) => {
-    const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
-    const out = Buffer.alloc(body.length + 8)
-    out.writeUInt32BE(data.length, 0)
-    body.copy(out, 4)
-    out.writeUInt32BE(crc32(body), body.length + 4)
-    return out
-  }
-  const header = Buffer.alloc(13)
-  header.writeUInt32BE(width, 0)
-  header.writeUInt32BE(height, 4)
-  header.set([8, 2, 0, 0, 0], 8) // 8-bit RGB
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', header),
-    chunk('IDAT', deflateSync(raw)),
-    chunk('IEND', Buffer.alloc(0)),
-  ])
-}
-
-const terrarium = (h: number) => {
-  const v = h + 32768
-  return [Math.floor(v / 256), Math.floor(v) % 256, Math.floor((v % 1) * 256)]
-}
-
-interface Requests {
-  imagery: number
-  elevation: number
-  maxElevationZoom: number
-}
-
-async function routeTiles(page: Page): Promise<Requests> {
-  const requests: Requests = { imagery: 0, elevation: 0, maxElevationZoom: 0 }
-  const cache = new Map<string, Buffer>()
-  const zxy = (url: string) => url.match(/\/(\d+)\/(\d+)\/(\d+)\.png/)!.slice(1).map(Number) as [number, number, number]
-  await page.route('https://tile.openstreetmap.org/**', (route) => {
-    requests.imagery++
-    const [z, x, y] = zxy(route.request().url())
-    const key = `i${z}/${x}/${y}`
-    if (!cache.has(key)) cache.set(key, png(256, 256, (px, py) => (pixelLonLat(z, x, y, px, py)[0] < COAST_LON ? WATER : LAND)))
-    return route.fulfill({ contentType: 'image/png', body: cache.get(key)!, headers: { 'access-control-allow-origin': '*' } })
-  })
-  await page.route('https://s3.amazonaws.com/elevation-tiles-prod/**', (route) => {
-    requests.elevation++
-    const [z, x, y] = zxy(route.request().url())
-    requests.maxElevationZoom = Math.max(requests.maxElevationZoom, z)
-    const key = `e${z}/${x}/${y}`
-    if (!cache.has(key)) cache.set(key, png(256, 256, (px, py) => terrarium(worldHeight(...pixelLonLat(z, x, y, px, py)))))
-    return route.fulfill({ contentType: 'image/png', body: cache.get(key)!, headers: { 'access-control-allow-origin': '*' } })
-  })
-  return requests
-}
-
+/** The terrain, on the synthetic world of tiles.ts. */
 /** Render until every requested tile has loaded. */
 async function settle(page: Page): Promise<void> {
   for (let i = 0; i < 200; ++i) {
@@ -205,15 +120,14 @@ test.describe('terrain', () => {
     })
   })
 
-  test('the sea is flat and keeps the ocean’s look', async ({ browser }) => {
-    // Over the synthetic sea (1000 m deep in the elevation data).
+  test('the sea is flat: bathymetry is clamped to sea level', async ({ browser }) => {
     // 80 km off the synthetic coast, so the whole frame is sea.
-    const sea = { lon: 8.5, lat: 45, alt: 0, tod: 12, doy: 170 }
-    const terrain = await shoot(browser, sea, HIGH_DOWN)
-    const ocean = await shoot(browser, { ...sea, terrain: 0 }, HIGH_DOWN)
-    const d = diff(terrain.pixels, ocean.pixels, 6)
-    expect(d.mean, 'terrain sea vs ray-traced ocean').toBeLessThan(3)
-    expect(d.over).toBeLessThan(0.02)
+    const sea = { lon: 8.5, lat: 45, alt: 0, tod: 9, doy: 170 }
+    const relief = await shoot(browser, sea, HIGH_DOWN)
+    const flat = await shoot(browser, { ...sea, exaggeration: 0 }, HIGH_DOWN)
+    const d = diff(relief.pixels, flat.pixels, 2)
+    expect(d.mean, 'sea with vs without elevation').toBeLessThan(0.5)
+    expect(d.over).toBeLessThan(0.01)
   })
 
   test('credits the map and elevation sources and stays within the elevation zooms', async ({ browser }) => {
