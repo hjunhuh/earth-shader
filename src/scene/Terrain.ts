@@ -11,8 +11,7 @@ import {
 } from 'three'
 import { TilesRenderer } from '3d-tiles-renderer/three'
 import { TerrariumMeshPlugin, XYZTilesOverlay } from '3d-tiles-renderer/three/plugins'
-import { OCEAN_ALBEDO, TERRAIN } from '../app/defaults'
-import { OSM_WATER_LINEAR, WATER_EDGE } from './terrainMath'
+import { TERRAIN } from '../app/defaults'
 
 export interface TerrainOptions {
   heightScale: number
@@ -23,8 +22,6 @@ export interface TerrainOptions {
 
 /** The plugin's TerrainBasicMaterial: MeshBasicMaterial plus injected displacement. */
 type TileMaterial = MeshBasicMaterial & { displacementMap: Texture | null; displacementScale: number; displacementBias: number }
-
-const glslVec3 = (v: readonly number[]) => `vec3(${v.map((x) => x.toFixed(6)).join(', ')})`
 
 /**
  * Terrain heights are clamped to sea level: the sea becomes a flat surface of
@@ -37,17 +34,6 @@ function replaceOnce(source: string, search: string, replacement: string): strin
   if (!source.includes(search)) throw new Error(`Terrain shader patch: "${search}" not found`)
   return source.replace(search, replacement)
 }
-
-// Map texels of OSM water become the ocean's albedo, so the sea, lakes and
-// rivers keep the look of the ray-traced ocean.
-const waterChunk = /* glsl */ `
-#include <map_fragment>
-#ifdef USE_MAP
-  float waterWeight = 1.0 - smoothstep(${WATER_EDGE[0].toFixed(3)}, ${WATER_EDGE[1].toFixed(3)},
-    distance(sampledDiffuseColor.rgb, ${glslVec3(OSM_WATER_LINEAR)}));
-  diffuseColor.rgb = mix(diffuseColor.rgb, ${glslVec3(OCEAN_ALBEDO)}, waterWeight);
-#endif
-`
 
 // Height-map bump normals from 3d-tiles-renderer's TerrainLambertMaterial
 // (Apache-2.0): central differences at one texel so the gradient interpolates
@@ -91,7 +77,6 @@ function patchAlbedo(material: MeshBasicMaterial): void {
       'texture2D( displacementMap, uv ).x',
       SEA_LEVEL_CLAMP.replace('DISPLACEMENT_UV', 'uv'),
     )
-    shader.fragmentShader = replaceOnce(shader.fragmentShader, '#include <map_fragment>', waterChunk)
   }
   material.customProgramCacheKey = () => 'earth-terrain-albedo'
   material.needsUpdate = true
@@ -113,12 +98,12 @@ function patchNormal(material: MeshNormalMaterial): void {
 }
 
 /**
- * OpenStreetMap imagery draped on Terrarium elevation tiles, on the WGS84
+ * Satellite imagery draped on Terrarium elevation tiles, on the WGS84
  * ellipsoid in ECEF meters (the world space). 3d-tiles-renderer does the
  * quadtree LOD, skirts, pole caps and GPU displacement; each tile mesh sits at
  * its own origin, so three's float64 model-view keeps it precise.
  *
- * The meshes are unlit: they write the map color as albedo and takram's
+ * The meshes are unlit: they write the imagery color as albedo and takram's
  * AerialPerspectiveEffect lights them. Their slopes reach it through the
  * normal pass, which draws each mesh with `normalMaterial(mesh)`.
  */
