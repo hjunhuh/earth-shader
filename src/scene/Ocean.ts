@@ -10,6 +10,7 @@ import {
   type PerspectiveCamera,
 } from 'three'
 import { OCEAN_ALBEDO } from '../app/defaults'
+import { createGlobalMapUniforms, globalMapGLSL, type GlobalMapUniforms } from './globalMap'
 import { oceanCTerm, WGS84_A, Z_SCALE } from './oceanMath'
 
 const vertexShader = /* glsl */ `
@@ -28,6 +29,7 @@ uniform vec3 cameraShading;
 uniform float cTerm;
 uniform vec3 shadingScale;
 uniform vec3 albedo;
+${globalMapGLSL}
 in vec2 vNdc;
 layout(location = 0) out vec4 outputColor;
 
@@ -53,17 +55,18 @@ void main() {
   float ndcZ = clip.z / clip.w;
   if (ndcZ > 1.0) discard; // Beyond the far plane, like a clipped mesh.
   gl_FragDepth = ndcZ * 0.5 + 0.5;
+  vec3 hit = cameraPosition + worldDirection * t;
   #ifdef NORMAL_OUTPUT
   // The radial normal takram uses when it has no normal buffer, in view space.
-  vec3 hit = cameraPosition + worldDirection * t;
   outputColor = vec4(0.5 * normalize(mat3(viewMatrix) * normalize(hit)) + 0.5, 1.0);
   #else
-  outputColor = vec4(albedo, 1.0);
+  // With the terrain on, the whole-Earth map stands in until its tiles load.
+  outputColor = vec4(mix(albedo, globalMapColor(hit), globalMapEnabled), 1.0);
   #endif
 }
 `
 
-export interface OceanUniforms {
+export interface OceanUniforms extends GlobalMapUniforms {
   [key: string]: Uniform
   inverseProjection: Uniform<Matrix4>
   cameraShading: Uniform<Vector3>
@@ -92,6 +95,7 @@ export class Ocean extends Mesh<BufferGeometry, ShaderMaterial> {
       cTerm: new Uniform(0),
       shadingScale: new Uniform(new Vector3(1, 1, Z_SCALE)),
       albedo: new Uniform(new Vector3(...albedo)),
+      ...createGlobalMapUniforms(),
     }
     const material = new ShaderMaterial({
       name: 'Ocean',

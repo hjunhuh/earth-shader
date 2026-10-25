@@ -47,7 +47,7 @@ import {
 import { localDateMs } from '../app/localDate'
 import { Spring } from '../app/spring'
 import type { AppState } from '../app/state'
-import { loadCloudAssets, loadMoonAssets, type CloudAssets, type MoonAssets } from './assets'
+import { loadCloudAssets, loadEarthMaps, loadMoonAssets, type CloudAssets, type EarthMaps, type MoonAssets } from './assets'
 import { applyCloudShadowFade } from './cloudShadowFade'
 import { EarthGlobeControls } from './EarthGlobeControls'
 import { Moon } from './Moon'
@@ -171,6 +171,7 @@ export class EarthScene {
   private readonly timeOfDay: Spring
   private assets: CloudAssets | null = null
   private moonAssets: MoonAssets | null = null
+  private earthMaps: EarthMaps | null = null
   private effectPasses: EffectPass[] = []
   private appliedQuality: Quality | null = null
   private appliedSunModel: AppState['sun']['model'] | null = null
@@ -284,6 +285,13 @@ export class EarthScene {
         if (this.clouds) this.assignCloudAssets(this.clouds)
         this.aerialPerspective.stbnTexture = assets.stbnTexture
       }),
+      loadEarthMaps().then((maps) => {
+        if (this.disposed) return Object.values(maps).forEach((t) => t.dispose())
+        this.earthMaps = maps
+        this.terrain.setGlobalMap(maps.blueMarble, maps.openSea)
+        this.ocean.material.uniforms.globalMap.value = maps.blueMarble
+        this.applyGlobalMap()
+      }),
       loadMoonAssets().then((assets: MoonAssets) => {
         if (this.disposed) return
         this.moonEffect.setMaps(assets.colorTexture, assets.slopeEastTexture, assets.slopeNorthTexture)
@@ -340,6 +348,7 @@ export class EarthScene {
     this.terrain.brightness = state.terrain.brightness
     this.normalPass.enabled = state.terrain.enabled
     this.aerialPerspective.normalBuffer = state.terrain.enabled ? this.normalPass.texture : null
+    this.applyGlobalMap()
     this.aerialPerspective.correctAltitude = state.atmosphere.correctAltitude
     this.sun.correctAltitude = state.atmosphere.correctAltitude
     this.moonEffect.correctAltitude = state.atmosphere.correctAltitude
@@ -380,6 +389,11 @@ export class EarthScene {
       clouds.correctAltitude = state.atmosphere.correctAltitude
       clouds.localWeatherVelocity.set(cloud.animate ? 0.001 : 0, 0)
     }
+  }
+
+  /** The ocean shows the whole-Earth map until tiles load, only with the terrain on (off: the story's plain ocean). */
+  private applyGlobalMap(): void {
+    this.ocean.material.uniforms.globalMapEnabled.value = this.state.terrain.enabled && this.earthMaps ? 1 : 0
   }
 
   private createClouds(): CloudsEffect {
@@ -797,6 +811,7 @@ export class EarthScene {
     this.globeControls.dispose()
     this.clouds?.dispose()
     this.terrain.dispose()
+    if (this.earthMaps) for (const texture of Object.values(this.earthMaps)) texture.dispose()
     this.normalPass.dispose()
     this.sun.dispose()
     this.composer.dispose()

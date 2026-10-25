@@ -12,6 +12,7 @@ import {
 import { TilesRenderer } from '3d-tiles-renderer/three'
 import { TerrariumMeshPlugin, XYZTilesOverlay } from '3d-tiles-renderer/three/plugins'
 import { TERRAIN } from '../app/defaults'
+import { createGlobalMapUniforms, globalMapGLSL, type GlobalMapUniforms } from './globalMap'
 
 export interface TerrainOptions {
   heightScale: number
@@ -68,14 +69,41 @@ const bumpChunk = /* glsl */ `
 #endif
 `
 
-function patchAlbedo(material: MeshBasicMaterial): void {
+function patchAlbedo(material: MeshBasicMaterial, globalMap: GlobalMapUniforms): void {
   const base = material.onBeforeCompile.bind(material)
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms, renderer: WebGLRenderer) => {
     base(shader, renderer)
+    Object.assign(shader.uniforms, globalMap)
     shader.vertexShader = replaceOnce(
       shader.vertexShader,
       'texture2D( displacementMap, uv ).x',
       SEA_LEVEL_CLAMP.replace('DISPLACEMENT_UV', 'uv'),
+    )
+    shader.vertexShader = replaceOnce(shader.vertexShader, '#include <common>', '#include <common>\nvarying vec3 vEcef;\nvarying vec2 vHeightUv;')
+    shader.vertexShader = replaceOnce(
+      shader.vertexShader,
+      '#include <project_vertex>',
+      '#include <project_vertex>\nvEcef = (modelMatrix * vec4(transformed, 1.0)).xyz; // world space is ECEF\nvHeightUv = uv;',
+    )
+    shader.fragmentShader = replaceOnce(
+      shader.fragmentShader,
+      '#include <common>',
+      `#include <common>
+      varying vec3 vEcef;
+      varying vec2 vHeightUv;
+      uniform sampler2D displacementMap; // the elevation grid (meters), shared with the vertex stage
+      ${globalMapGLSL}`,
+    )
+    // Zoomed out, and over open sea, the whole-Earth map replaces the tiles (globalMap.ts).
+    shader.fragmentShader = replaceOnce(
+      shader.fragmentShader,
+      '#include <map_fragment>',
+      `#include <map_fragment>
+      // The ~5 km open-sea mask stops at land: above sea level in the tile's
+      // own elevation (which agrees across zoom levels on land).
+      float sea = 1.0 - smoothstep(0.5, 5.0, texture2D(displacementMap, vHeightUv).x);
+      float globalShare = max(globalMapWeight(vEcef), globalMapOpenSea(vEcef) * sea);
+      diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * globalMapColor(vEcef), globalShare);`,
     )
   }
   material.customProgramCacheKey = () => 'earth-terrain-albedo'
@@ -114,6 +142,8 @@ export class Terrain {
   private readonly meshes = new Set<Mesh>()
   private readonly normalMaterials = new WeakMap<Mesh, MeshNormalMaterial>()
   private _enabled = true
+  /** The whole-Earth map the tiles blend into from afar (shared by every tile material). */
+  readonly globalMap = createGlobalMapUniforms()
   private _covering = false
   private _brightness: number
 
@@ -141,6 +171,13 @@ export class Terrain {
 
   get group(): Object3D {
     return this.tiles.group
+  }
+
+  /** Use this whole-Earth texture from afar and its open-sea mask (null: tiles only). */
+  setGlobalMap(texture: Texture | null, openSeaMask: Texture | null): void {
+    this.globalMap.globalMap.value = texture
+    this.globalMap.openSeaMask.value = openSeaMask
+    this.globalMap.globalMapEnabled.value = texture && openSeaMask ? 1 : 0
   }
 
   get enabled(): boolean {
@@ -228,7 +265,7 @@ export class Terrain {
       if (!(object instanceof Mesh)) return
       const material = object.material as MeshBasicMaterial
       material.color.setScalar(this._brightness)
-      patchAlbedo(material)
+      patchAlbedo(material, this.globalMap)
       this.meshes.add(object)
     })
   }
