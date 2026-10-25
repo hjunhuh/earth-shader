@@ -9,6 +9,10 @@ import {
   createPose,
   earthNadirPose,
   flightPose,
+  geodeticUp,
+  lookQuaternion,
+  rotatePoseAbout,
+  viewHeading,
   flightPosition,
   MOON_ALTITUDE_LIMITS,
   MoonControls,
@@ -135,6 +139,49 @@ describe('earthNadirPose', () => {
       expect(screenRight.dot(east)).toBeCloseTo(1, 9)
       expect(pose.up.dot(up)).toBeCloseTo(1, 9)
     }
+  })
+})
+
+describe('viewHeading / rotatePoseAbout', () => {
+  const deg = Math.PI / 180
+
+  it('reads the heading of straight-down and tilted views, clockwise from north', () => {
+    const base = earthNadirPose(radians(127), radians(37.5), 5000)
+    const up = geodeticUp(base.position)
+    expect(viewHeading(base.quaternion, up)).toBeCloseTo(0, 9)
+    for (const heading of [30, 90, -120, 179]) {
+      // Turning the rig counterclockwise by θ turns the view's heading to −θ.
+      const turned = rotatePoseAbout(base, base.position, up, -heading * deg)
+      expect(viewHeading(turned.quaternion, up) / deg).toBeCloseTo(heading, 6)
+      // Tilted toward the horizon (forward 80° from straight down), same heading.
+      const east = new Vector3(-up.y, up.x, 0).normalize()
+      const north = new Vector3().crossVectors(up, east)
+      const horizontal = north.multiplyScalar(Math.cos(heading * deg)).addScaledVector(east, Math.sin(heading * deg))
+      const tilt = 80 * deg
+      const forward = up.clone().multiplyScalar(-Math.cos(tilt)).addScaledVector(horizontal, Math.sin(tilt))
+      const screenUp = up.clone().multiplyScalar(Math.sin(tilt)).addScaledVector(horizontal, Math.cos(tilt))
+      expect(viewHeading(lookQuaternion(forward, screenUp), up) / deg).toBeCloseTo(heading, 6)
+    }
+  })
+
+  it('turning by the heading brings north up and keeps the pivot, distance and tilt', () => {
+    const start = earthNadirPose(radians(10), radians(45), 20000)
+    const pivotUp = geodeticUp(start.position)
+    const pivot = start.position.clone().addScaledVector(pivotUp, -20000)
+    // Tilt 50° about an east-west axis through the pivot, then turn to heading 140°.
+    const east = new Vector3(-pivotUp.y, pivotUp.x, 0).normalize()
+    const tiltRotation = new Quaternion().setFromAxisAngle(east, 50 * deg)
+    const tilted = createPose()
+    tilted.position.copy(start.position).sub(pivot).applyQuaternion(tiltRotation).add(pivot)
+    tilted.quaternion.copy(tiltRotation).multiply(start.quaternion)
+    const pose = rotatePoseAbout(tilted, pivot, pivotUp, -140 * deg)
+    const heading = viewHeading(pose.quaternion, pivotUp)
+    expect(heading / deg).toBeCloseTo(140, 6)
+    const north = rotatePoseAbout(pose, pivot, pivotUp, heading)
+    expect(viewHeading(north.quaternion, pivotUp)).toBeCloseTo(0, 9)
+    expect(north.position.distanceTo(pivot)).toBeCloseTo(pose.position.distanceTo(pivot), 6)
+    const forward = (p: typeof pose) => new Vector3(0, 0, -1).applyQuaternion(p.quaternion)
+    expect(forward(north).dot(pivotUp)).toBeCloseTo(forward(pose).dot(pivotUp), 9)
   })
 })
 

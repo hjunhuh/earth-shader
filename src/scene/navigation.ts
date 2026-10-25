@@ -67,6 +67,40 @@ export function earthNadirPose(longitude: number, latitude: number, altitude: nu
   return result
 }
 
+/** Geodetic "up" (the ellipsoid normal of the point below) at any ECEF position. */
+export function geodeticUp(position: Vector3, result = new Vector3()): Vector3 {
+  const g = new Geodetic().setFromECEF(position)
+  return result.set(Math.cos(g.latitude) * Math.cos(g.longitude), Math.cos(g.latitude) * Math.sin(g.longitude), Math.sin(g.latitude))
+}
+
+/**
+ * Heading of a view about the vertical `up` (radians clockwise from north,
+ * (−π, π]): the direction the top of the screen points along the ground.
+ * Screen-up and forward both lean along it at every tilt, so their sum stays
+ * well defined from straight down to the horizon. 0 when undefined (looking
+ * straight down a pole's axis).
+ */
+export function viewHeading(quaternion: Quaternion, up: Vector3): number {
+  const forward = new Vector3(0, 0, -1).applyQuaternion(quaternion)
+  const screenUp = new Vector3(0, 1, 0).applyQuaternion(quaternion)
+  const h = forward.add(screenUp)
+  h.addScaledVector(up, -h.dot(up))
+  const east = new Vector3(-up.y, up.x, 0)
+  if (h.lengthSq() < 1e-12 || east.lengthSq() < 1e-12) return 0
+  east.normalize()
+  const north = new Vector3().crossVectors(up, east)
+  return Math.atan2(h.dot(east), h.dot(north))
+}
+
+/** A pose turned by `angle` (radians, counterclockwise seen from above) about the vertical `up` through `pivot`. */
+export function rotatePoseAbout(pose: Pose, pivot: Vector3, up: Vector3, angle: number, result = createPose()): Pose {
+  const rotation = new Quaternion().setFromAxisAngle(up, angle)
+  result.position.copy(pose.position).sub(pivot).applyQuaternion(rotation).add(pivot)
+  result.quaternion.copy(rotation).multiply(pose.quaternion)
+  result.up.copy(pose.up).applyQuaternion(rotation)
+  return result
+}
+
 // --- Moon orbit controls ------------------------------------------------------
 
 export interface MoonView {
