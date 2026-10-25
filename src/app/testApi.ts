@@ -48,6 +48,8 @@ export interface EarthTestApi {
   terrainProgress?(): number
   /** Loaded ground height (m × exaggeration) at a point in degrees, or null. */
   elevationAt?(longitude: number, latitude: number): number | null
+  /** View heading in degrees clockwise from north (the compass). */
+  heading?(): number
   /** 'globe' or 'orbit' (`?nav=`). */
   earthControls?(): string
   /** Longitude/latitude (degrees) of the WGS84 ellipsoid under a CSS pixel, or null off the globe. */

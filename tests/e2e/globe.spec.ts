@@ -146,4 +146,42 @@ test.describe('globe controls', () => {
     await drag(page, [300, 170], [380, 210])
     expect(separation((await view(page)).center!, back.center!), 'drag still turns the globe').toBeGreaterThan(3)
   })
+
+  test('the compass button turns north up around the screen center', async ({ page }) => {
+    await openGlobe(page)
+    await wheel(page, CENTER, -300, 30)
+    // Tilt, then turn the view with a sideways right drag.
+    await drag(page, [320, 300], [320, 220], 'right')
+    await drag(page, [200, 250], [420, 250], 'right')
+    const heading = await page.evaluate(() => window.__earth!.heading!())
+    expect(Math.abs(heading), 'the view was turned').toBeGreaterThan(20)
+    const needle = () => page.locator('#compass .needle').evaluate((e) => getComputedStyle(e).transform)
+    const angle = (matrix: string) => {
+      const [a, b] = matrix.slice(7, -1).split(',').map(Number)
+      return (Math.atan2(b!, a!) * 180) / Math.PI
+    }
+    expect(angle(await needle()), 'the needle points north on screen').toBeCloseTo(-heading, 0)
+    const before = await view(page)
+    expect(before.tilt).toBeGreaterThan(10)
+
+    await page.click('#compass')
+    await renderFrames(page, 60) // 0.8 s at 60 Hz
+    const after = await view(page)
+    expect(Math.abs(await page.evaluate(() => window.__earth!.heading!()))).toBeLessThan(0.1)
+    expect(Math.abs(angle(await needle()))).toBeLessThan(0.2)
+    expect(separation(after.center!, before.center!), 'same point at the center').toBeLessThan(0.001)
+    expect(after.tilt).toBeCloseTo(before.tilt, 1)
+    expect(after.altitude / before.altitude).toBeCloseTo(1, 3)
+  })
+
+  test('on the Moon the compass turns lunar north up', async ({ page }) => {
+    await openGlobe(page)
+    await page.evaluate(() => window.__earth!.flyTo!('moon', { instant: true, heading: 60, tilt: 30 }))
+    await renderFrames(page, 2)
+    expect(await page.evaluate(() => window.__earth!.heading!())).toBeCloseTo(60, 3)
+    await page.click('#compass')
+    await renderFrames(page, 2)
+    expect(await page.evaluate(() => window.__earth!.heading!())).toBeCloseTo(0, 3)
+    expect((await page.evaluate(() => window.__earth!.moonView!())).tilt).toBeCloseTo((30 * Math.PI) / 180, 3)
+  })
 })

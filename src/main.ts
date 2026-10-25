@@ -58,6 +58,7 @@ if (parsed.test.enabled) {
   api.terrainProgress = () => scene.terrain.loadProgress
   api.elevationAt = (lon, lat) => scene.terrain.elevationAt((lat * Math.PI) / 180, (lon * Math.PI) / 180)
   api.earthControls = () => scene.earthControls
+  api.heading = () => (scene.heading() * 180) / Math.PI
   api.surfacePointAt = (x, y) => {
     const { width, height } = api.size()
     const c = scene.camera
