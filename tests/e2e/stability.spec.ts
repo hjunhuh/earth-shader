@@ -33,6 +33,32 @@ test.describe('stability', () => {
     await ref.close()
   })
 
+  test('space is black from just below the top of the atmosphere (takram 0.19.1 LUT renders it blue: negative control)', async ({ page, browser }) => {
+    // Orbit target at 30 km, camera pulled back at a 30° pitch: the sweep puts
+    // the camera through the last ~4 km under the atmosphere top (about
+    // 56–60 km with correctAltitude), where the bad LUT texel shows up.
+    const sweep = async (p: Page, path: string) => {
+      await open(p, path, { tod: 8, alt: 30_000 }, { frames: 0 })
+      const tops: { altitude: number; luma: number }[] = []
+      for (let d = 46_000; d <= 62_000; d += 1_000) {
+        await p.evaluate((d) => window.__earth!.setPointOfView(0, -30, d), d)
+        await renderFrames(p, 10)
+        const c = await camera(p)
+        const px = await readPixels(p, 0, 0, 640, 20)
+        let s = 0
+        for (let i = 0; i < px.length; i += 4) s += luma(px, i)
+        tops.push({ altitude: Math.round(Math.hypot(...c.position) - 6371e3), luma: s / (px.length / 4) })
+      }
+      return tops
+    }
+    const app = await sweep(page, APP)
+    const ref = await browser.newPage()
+    const reference = await sweep(ref, REF)
+    await ref.close()
+    for (const t of app) expect(t.luma, `app at r − 6371 km = ${t.altitude} m`).toBeLessThan(8)
+    expect(Math.max(...reference.map((t) => t.luma))).toBeGreaterThan(40)
+  })
+
   test('a full day renders: bright at noon, dark at midnight, no errors', async ({ page }) => {
     const mean: number[] = []
     for (const tod of [0, 4, 8, 12, 16, 20]) {

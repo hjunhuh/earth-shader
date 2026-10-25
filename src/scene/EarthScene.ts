@@ -30,6 +30,7 @@ import { loadCloudAssets, type CloudAssets } from './assets'
 import { Ocean } from './Ocean'
 import { clipPlanes } from './oceanMath'
 import { groupEffects } from './passes'
+import { applyScatteringLutFix } from './scatteringLutFix'
 import { applySpaceViewFix } from './spaceViewFix'
 import { SunEffect } from './SunEffect'
 
@@ -127,7 +128,7 @@ export class EarthScene {
     this.composer = new EffectComposer(this.renderer, { frameBufferType: HalfFloatType, multisampling: 0 })
     this.composer.addPass(new RenderPass(this.scene, this.camera))
 
-    this.generator = new PrecomputedTexturesGenerator(this.renderer)
+    this.generator = applyScatteringLutFix(new PrecomputedTexturesGenerator(this.renderer))
     this.aerialPerspective = applySpaceViewFix(
       new AerialPerspectiveEffect(this.camera, {
         ...aerialPerspectiveEffectOptionsDefaults,
