@@ -31,10 +31,10 @@ import {
   PrecomputedTexturesGenerator,
 } from '@takram/three-atmosphere'
 import { CloudsEffect, type CloudsEffectChangeEvent } from '@takram/three-clouds'
-import { Geodetic, PointOfView, radians } from '@takram/three-geospatial'
+import { Ellipsoid, Geodetic, PointOfView, radians } from '@takram/three-geospatial'
 import { DitheringEffect, LensFlareEffect } from '@takram/three-geospatial-effects'
 import { applyLocation } from '../app/applyLocation'
-import { CAMERA, CLOUD_SHADOW_MAX_FAR, CONTROLS, type Quality, type ToneMappingName } from '../app/defaults'
+import { CAMERA, CLOUD_SHADOW_MAX_FAR, CONTROLS, TERRAIN, type Quality, type ToneMappingName } from '../app/defaults'
 import { localDateMs } from '../app/localDate'
 import { Spring } from '../app/spring'
 import type { AppState } from '../app/state'
@@ -55,12 +55,14 @@ import {
   type MoonView,
   type Pose,
 } from './navigation'
+import { SceneNormalPass } from './NormalPass'
 import { Ocean } from './Ocean'
 import { clipPlanes, WGS84_A } from './oceanMath'
 import { groupEffects } from './passes'
 import { applyScatteringLutFix } from './scatteringLutFix'
 import { applySpaceViewFix } from './spaceViewFix'
 import { SunEffect } from './SunEffect'
+import { liftAboveGround, Terrain } from './Terrain'
 
 export const TONE_MAPPING: Record<ToneMappingName, ToneMappingMode> = {
   AgX: ToneMappingMode.AGX,
@@ -119,6 +121,9 @@ export class EarthScene {
   readonly controls: OrbitControls
   readonly scene = new Scene()
   readonly ocean = new Ocean()
+  /** OpenStreetMap on real elevation; lit by the aerial perspective through `normalPass`. */
+  readonly terrain: Terrain
+  readonly normalPass: SceneNormalPass
   readonly composer: EffectComposer
   readonly generator: PrecomputedTexturesGenerator
   readonly aerialPerspective: AerialPerspectiveEffect
@@ -188,6 +193,8 @@ export class EarthScene {
     this.controls.connect(canvas)
 
     this.scene.add(this.ocean)
+    this.terrain = new Terrain({ heightScale: state.terrain.heightScale, brightness: state.terrain.brightness })
+    this.scene.add(this.terrain.group)
     this.scene.add(this.moon)
 
     this.moonControls = new MoonControls(MOON_RADIUS, () => this.camera.fov * DEG)
@@ -197,6 +204,12 @@ export class EarthScene {
 
     this.composer = new EffectComposer(this.renderer, { frameBufferType: HalfFloatType, multisampling: 0 })
     this.composer.addPass(new RenderPass(this.scene, this.camera))
+    this.normalPass = new SceneNormalPass(this.scene, this.camera, (object) => {
+      if (object === this.ocean) return this.ocean.normalMaterial
+      if (this.terrain.isTerrainMesh(object)) return this.terrain.normalMaterial(object)
+      return null
+    })
+    this.composer.addPass(this.normalPass)
 
     this.generator = applyScatteringLutFix(new PrecomputedTexturesGenerator(this.renderer))
     this.aerialPerspective = applyCloudShadowFade(
@@ -283,6 +296,13 @@ export class EarthScene {
       else spring.set(value)
     }
     this.toneMapping.mode = TONE_MAPPING[toneMapping.mode]
+    // Without terrain the ocean's normal is the radial one takram falls back
+    // to, so the normal pass is skipped and the render is exactly the story's.
+    this.terrain.enabled = state.terrain.enabled
+    this.terrain.heightScale = state.terrain.heightScale
+    this.terrain.brightness = state.terrain.brightness
+    this.normalPass.enabled = state.terrain.enabled
+    this.aerialPerspective.normalBuffer = state.terrain.enabled ? this.normalPass.texture : null
     this.aerialPerspective.correctAltitude = state.atmosphere.correctAltitude
     this.sun.correctAltitude = state.atmosphere.correctAltitude
     this.moonEffect.correctAltitude = state.atmosphere.correctAltitude
@@ -435,7 +455,10 @@ export class EarthScene {
     this.timeOfDay.step(delta)
     this.updateEphemeris()
     this.updateCamera(delta)
+    this.keepAboveGround()
     this.updateClipPlanes()
+    this.terrain.update(this.camera, this.renderer)
+    this.ocean.visible = !this.terrain.covering
 
     const ap = this.aerialPerspective
     ap.sunDirection.copy(this.sunDirection)
@@ -455,6 +478,25 @@ export class EarthScene {
     this.ocean.update(this.camera)
     this.composer.render(delta)
     this.frame++
+  }
+
+  private readonly groundUp = new Vector3()
+
+  /** Earth focus: never let the camera sink into the terrain. */
+  private keepAboveGround(): void {
+    if (!this.terrain.enabled || this.focusBody !== 'earth' || this.flight) return
+    let height: number
+    try {
+      height = this.geodetic.setFromECEF(this.camera.position).height
+    } catch {
+      return
+    }
+    const ground = this.terrain.elevationAt(this.geodetic.latitude, this.geodetic.longitude)
+    if (ground == null) return
+    Ellipsoid.WGS84.getSurfaceNormal(this.camera.position, this.groundUp)
+    if (liftAboveGround(this.camera.position, this.groundUp, height, ground, TERRAIN.minClearance)) {
+      this.camera.updateMatrixWorld()
+    }
   }
 
   /** Sun (takram's) and Moon (true position, same frame; see moonModel.ts) for the current date, ECEF. */
@@ -642,6 +684,8 @@ export class EarthScene {
     if (this.moonAssets) for (const t of Object.values(this.moonAssets)) t.dispose()
     this.controls.dispose()
     this.clouds?.dispose()
+    this.terrain.dispose()
+    this.normalPass.dispose()
     this.sun.dispose()
     this.composer.dispose()
     this.generator.dispose()
