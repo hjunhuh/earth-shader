@@ -9,6 +9,13 @@
   <body>
     <canvas id="earth"></canvas>
     <div id="ui"></div>
+    <button id="compass" type="button" title="북쪽을 위로 (North up)" aria-label="북쪽을 위로 회전">
+      <svg class="needle" viewBox="-20 -20 40 40" aria-hidden="true">
+        <text x="0" y="-11" text-anchor="middle" dominant-baseline="central">N</text>
+        <path class="north" d="M0 -7 L4.5 1 L-4.5 1 Z" />
+        <path class="south" d="M0 13 L4.5 1 L-4.5 1 Z" />
+      </svg>
+    </button>
     <div id="attribution">
       Imagery: <a href="https://cloudless.eox.at" target="_blank" rel="noopener">EOxCloudless</a> by EOX IT Services GmbH
       (contains modified Copernicus Sentinel data 2016,

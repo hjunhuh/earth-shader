@@ -29,6 +29,10 @@ export class EarthApp {
   private readonly timer = new Timer()
   private running = false
   private readonly resizeObserver: ResizeObserver
+  private readonly compass: HTMLButtonElement | null
+  private readonly needle: SVGElement | null
+  private shownHeading = Number.NaN
+  private readonly onCompass = () => this.scene.resetNorth()
 
   constructor({ canvas, state, test, view, uiContainer }: EarthAppOptions) {
     this.canvas = canvas
@@ -65,6 +69,11 @@ export class EarthApp {
       scene.flyTo('moon', { instant: true, altitude, longitude, latitude, heading, tilt })
     }
     this.showAttribution()
+    // The compass: its needle points north on screen; a click turns north up.
+    this.compass = document.getElementById('compass') as HTMLButtonElement | null
+    this.needle = this.compass?.querySelector<SVGElement>('.needle') ?? null
+    this.compass?.addEventListener('click', this.onCompass)
+    this.updateCompass()
     this.resize()
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(canvas)
@@ -105,6 +114,7 @@ export class EarthApp {
     this.scene.renderer.setAnimationLoop((timestamp) => {
       this.timer.update(timestamp)
       this.scene.render(this.timer.getDelta())
+      this.updateCompass()
     })
   }
 
@@ -117,6 +127,17 @@ export class EarthApp {
   /** Deterministic frames for tests (fixed 60 Hz delta). */
   renderFrames(count: number, delta = 1 / 60): void {
     for (let i = 0; i < count; ++i) this.scene.render(delta)
+    this.updateCompass()
+  }
+
+  private updateCompass(): void {
+    if (!this.compass || !this.needle) return
+    this.compass.disabled = this.scene.flying
+    const degrees = (this.scene.heading() * 180) / Math.PI
+    if (Math.abs(degrees - this.shownHeading) < 0.05) return
+    this.shownHeading = degrees
+    // Heading is clockwise from north, so north sits that far counterclockwise from screen-up.
+    this.needle.style.transform = `rotate(${-degrees}deg)`
   }
 
   get testConfig(): TestConfig {
@@ -126,6 +147,7 @@ export class EarthApp {
   dispose(): void {
     this.stop()
     this.resizeObserver.disconnect()
+    this.compass?.removeEventListener('click', this.onCompass)
     this.panel?.dispose()
     this.scene.dispose()
   }
