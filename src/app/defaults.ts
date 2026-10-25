@@ -68,6 +68,22 @@ export const CONTROLS = {
   enableDamping: true,
 } as const
 
+/**
+ * Earth camera controls. 'globe' (default): Google Earth style, the globe
+ * turns under the cursor, starting straight down over the location. 'orbit':
+ * the takram story's OrbitControls around the location (the reference the
+ * parity tests compare against).
+ */
+export const EARTH_CONTROLS = ['globe', 'orbit'] as const
+export type EarthControlsName = (typeof EARTH_CONTROLS)[number]
+
+export const GLOBE = {
+  /** Starting camera height over the location: the whole Earth fills ~60% of the view. */
+  initialAltitude: 1e7,
+  /** Farthest the controls zoom out, from the Earth's center (meters). */
+  maxDistance: 1e8,
+} as const
+
 /** `<Clouds shadow-maxFar={1e5} />` in the story. */
 export const CLOUD_SHADOW_MAX_FAR = 1e5
 
