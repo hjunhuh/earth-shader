@@ -16,6 +16,11 @@ body {
 #earth:active {
   cursor: grabbing;
 }
+/* The globe controls focus the canvas on pointerdown (for keyboard input);
+   don't draw the browser's focus ring around the whole view. */
+#earth:focus {
+  outline: none;
+}
 #ui {
   position: fixed;
   top: 8px;
