@@ -48,6 +48,10 @@ export interface EarthTestApi {
   terrainProgress?(): number
   /** Loaded ground height (m × exaggeration) at a point in degrees, or null. */
   elevationAt?(longitude: number, latitude: number): number | null
+  /** 'globe' or 'orbit' (`?nav=`). */
+  earthControls?(): string
+  /** Longitude/latitude (degrees) of the WGS84 ellipsoid under a CSS pixel, or null off the globe. */
+  surfacePointAt?(x: number, y: number): [number, number] | null
 }
 
 /** Project an ECEF point (float64, camera-relative) to CSS pixels; radius is the Moon's apparent radius. */

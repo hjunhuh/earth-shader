@@ -1,7 +1,8 @@
 import { EarthApp } from './app/EarthApp'
 import { createTestApi, projectPoint } from './app/testApi'
 import { parseUrl } from './app/urlState'
-import { Vector3 } from 'three'
+import { Ray, Vector3 } from 'three'
+import { Ellipsoid, Geodetic } from '@takram/three-geospatial'
 import './style.css'
 
 function fail(message: string): never {
@@ -56,6 +57,17 @@ if (parsed.test.enabled) {
   api.projectMoon = () => projectPoint(scene.camera, scene.moon.position, api.size())
   api.terrainProgress = () => scene.terrain.loadProgress
   api.elevationAt = (lon, lat) => scene.terrain.elevationAt((lat * Math.PI) / 180, (lon * Math.PI) / 180)
+  api.earthControls = () => scene.earthControls
+  api.surfacePointAt = (x, y) => {
+    const { width, height } = api.size()
+    const c = scene.camera
+    c.updateMatrixWorld()
+    const direction = new Vector3((x / width) * 2 - 1, 1 - (y / height) * 2, 0.5).unproject(c).sub(c.position).normalize()
+    const hit = Ellipsoid.WGS84.getIntersection(new Ray(c.position.clone(), direction))
+    if (!hit) return null
+    const g = new Geodetic().setFromECEF(hit)
+    return [(g.longitude * 180) / Math.PI, (g.latitude * 180) / Math.PI]
+  }
   window.__earth = api
   ;(window as unknown as { __earthApp: EarthApp }).__earthApp = app // internals, for debugging probes
   scene.ready
