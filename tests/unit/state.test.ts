@@ -9,6 +9,7 @@ describe('state', () => {
       date: { dayOfYear: 1, timeOfDay: 8 },
       cloud: { enabled: true, quality: 'high', coverage: 0.3, animate: false },
       sun: { model: 'realistic', glare: 0.1, corona: 0.5 },
+      moon: { model: 'realistic' },
       toneMapping: { mode: 'AgX', exposure: 10 },
       atmosphere: { correctAltitude: true },
     })

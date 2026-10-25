@@ -50,7 +50,11 @@ test.describe('control panel', () => {
 
   test('dragging and zooming the view leaves every panel value unchanged', async ({ page }) => {
     await open(page, APP, {}, { frames: 1, ui: true })
-    const snapshot = () => page.locator('.lil-gui input').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).type === 'checkbox' ? String((e as HTMLInputElement).checked) : (e as HTMLInputElement).value))
+    // Disabled inputs are live readouts (camera altitude, Moon distance), not values.
+    const snapshot = () =>
+      page
+        .locator('.lil-gui input:not(:disabled)')
+        .evaluateAll((els) => els.map((e) => (e as HTMLInputElement).type === 'checkbox' ? String((e as HTMLInputElement).checked) : (e as HTMLInputElement).value))
     const before = await snapshot()
     await page.mouse.move(60, 250)
     await page.mouse.down()

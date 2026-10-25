@@ -1,0 +1,167 @@
+import { describe, expect, it } from 'vitest'
+import { Quaternion, Vector3 } from 'three'
+import { getECIToECEFRotationMatrix } from '@takram/three-atmosphere'
+import { Moon } from '../../src/scene/Moon'
+import { MOON_RADIUS } from '../../src/scene/moonModel'
+import {
+  aroundCenter,
+  createPose,
+  flightPose,
+  flightPosition,
+  MOON_ALTITUDE_LIMITS,
+  MoonControls,
+  moonPoseToECEF,
+  moonViewFromECEF,
+  moonViewPoseFixed,
+  type FlightEnds,
+} from '../../src/scene/navigation'
+import { WGS84_A } from '../../src/scene/oceanMath'
+
+const DATE = Date.UTC(2026, 0, 2, 6)
+
+function moonAt(date: number): Moon {
+  const moon = new Moon()
+  moon.update(date, getECIToECEFRotationMatrix(date))
+  return moon
+}
+
+describe('aroundCenter', () => {
+  it('hits both ends exactly and interpolates the distance in log space', () => {
+    const c = new Vector3(1, 2, 3)
+    const a = new Vector3(11, 2, 3)
+    const b = new Vector3(1, 2, 1003)
+    expect(aroundCenter(c, a, b, 0).distanceTo(a)).toBeLessThan(1e-9)
+    expect(aroundCenter(c, a, b, 1).distanceTo(b)).toBeLessThan(1e-9)
+    expect(aroundCenter(c, a, b, 0.5).distanceTo(c)).toBeCloseTo(100, 6) // √(10·1000)
+  })
+
+  it('handles antipodal ends', () => {
+    const p = aroundCenter(new Vector3(), new Vector3(0, 0, 5), new Vector3(0, 0, -5), 0.5)
+    expect(p.length()).toBeCloseTo(5, 9)
+    expect(Math.abs(p.z)).toBeLessThan(1e-9)
+  })
+})
+
+describe('flights', () => {
+  const moon = moonAt(DATE)
+
+  function earthToMoon(groundDirection: Vector3): FlightEnds {
+    const start = createPose()
+    start.position.copy(groundDirection).normalize().multiplyScalar(WGS84_A + 300)
+    const end = moonPoseToECEF(
+      moonViewPoseFixed({ longitude: 2, latitude: 0.3, altitude: 2 * MOON_RADIUS, heading: 0, tilt: 0 }, MOON_RADIUS),
+      moon,
+    )
+    return { start, originCenter: new Vector3(), originRadius: WGS84_A, targetCenter: moon.position.clone(), end }
+  }
+
+  it('starts at the start pose and ends at the end pose', () => {
+    const ends = earthToMoon(new Vector3(1, 0, 0))
+    expect(flightPosition(ends, 0).distanceTo(ends.start.position)).toBeLessThan(1e-3)
+    expect(flightPosition(ends, 1).distanceTo(ends.end.position)).toBeLessThan(1e-3)
+    const last = flightPose(ends, 1)
+    expect(Math.abs(last.quaternion.dot(ends.end.quaternion))).toBeCloseTo(1, 9)
+  })
+
+  it('never passes through the Earth or the Moon, from anywhere on the Earth', () => {
+    const dirs = [
+      new Vector3(1, 0, 0),
+      new Vector3(-1, 0, 0),
+      new Vector3(0, 1, 0),
+      new Vector3(0, -1, 0),
+      new Vector3(0, 0, 1),
+      moon.position.clone().negate(), // the Moon straight below the horizon
+      moon.position.clone(),
+    ]
+    for (const dir of dirs) {
+      const ends = earthToMoon(dir)
+      let previous = flightPosition(ends, 0)
+      for (let i = 1; i <= 2000; ++i) {
+        const p = flightPosition(ends, i / 2000)
+        // The straight segment between samples stays clear too.
+        for (const s of [0, 0.5, 1]) {
+          const q = previous.clone().lerp(p, s)
+          expect(q.length()).toBeGreaterThan(WGS84_A)
+          expect(q.distanceTo(moon.position)).toBeGreaterThan(MOON_RADIUS)
+        }
+        previous = p
+      }
+    }
+  })
+
+  it('moves monotonically away from the Earth while climbing, then toward the Moon', () => {
+    const ends = earthToMoon(new Vector3(0, 0, 1))
+    let earth = 0
+    let toMoon = Infinity
+    for (let i = 0; i <= 400; ++i) {
+      const t = i / 1000 // climb: t ≤ 0.4
+      const d = flightPosition(ends, t).length()
+      expect(d).toBeGreaterThanOrEqual(earth - 1e-6)
+      earth = d
+    }
+    for (let i = 401; i <= 1000; ++i) {
+      const d = flightPosition(ends, i / 1000).distanceTo(moon.position)
+      expect(d).toBeLessThanOrEqual(toMoon + 1e-6)
+      toMoon = d
+    }
+  })
+})
+
+describe('MoonControls', () => {
+  it('zooms the altitude multiplicatively within its limits', () => {
+    const c = new MoonControls(MOON_RADIUS, () => 1)
+    c.smoothing = Infinity
+    c.set({ longitude: 0, latitude: 0, altitude: 1000, heading: 0, tilt: 0 })
+    c.zoom(0.5)
+    expect(c.update(0).altitude).toBeCloseTo(500, 9)
+    for (let i = 0; i < 100; ++i) c.zoom(0.5)
+    expect(c.update(0).altitude).toBe(MOON_ALTITUDE_LIMITS.min)
+    for (let i = 0; i < 200; ++i) c.zoom(2)
+    expect(c.update(0).altitude).toBe(MOON_ALTITUDE_LIMITS.max)
+  })
+
+  it('eases toward the goal and takes the short way around in longitude', () => {
+    const c = new MoonControls(MOON_RADIUS, () => 1)
+    c.set({ longitude: Math.PI - 0.1, latitude: 0, altitude: 1e6, heading: 0, tilt: 0 })
+    c.goal.longitude = -Math.PI + 0.1 // 0.2 rad east across the date line
+    for (let i = 0; i < 200; ++i) c.update(1 / 60)
+    const lon = c.view.longitude
+    expect(Math.abs(Math.atan2(Math.sin(lon - c.goal.longitude), Math.cos(lon - c.goal.longitude)))).toBeLessThan(1e-6)
+    expect(Math.abs(lon)).toBeGreaterThan(3) // never swept through 0
+  })
+
+  it('a view → ECEF pose → view round trip', () => {
+    const moon = moonAt(DATE)
+    const view = { longitude: 0.7, latitude: -0.4, altitude: 12345, heading: 1.1, tilt: 0.9 }
+    const pose = moonPoseToECEF(moonViewPoseFixed(view, MOON_RADIUS), moon)
+    expect(moon.altitudeOf(pose.position)).toBeCloseTo(view.altitude, 3)
+    const back = moonViewFromECEF(pose.position, pose.quaternion, moon, MOON_RADIUS)
+    for (const k of ['longitude', 'latitude', 'heading', 'tilt'] as const) expect(back[k]).toBeCloseTo(view[k], 9)
+    expect(back.altitude).toBeCloseTo(view.altitude, 3)
+  })
+
+  it('looking straight down has north at the top of the screen and east to the right', () => {
+    const pose = moonViewPoseFixed({ longitude: 0, latitude: 0, altitude: 1e5, heading: 0, tilt: 0 }, MOON_RADIUS)
+    const right = new Vector3(1, 0, 0).applyQuaternion(pose.quaternion)
+    const up = new Vector3(0, 1, 0).applyQuaternion(pose.quaternion)
+    const forward = new Vector3(0, 0, -1).applyQuaternion(pose.quaternion)
+    expect(forward.distanceTo(new Vector3(-1, 0, 0))).toBeLessThan(1e-12) // down at 0°, 0°
+    expect(up.distanceTo(new Vector3(0, 0, 1))).toBeLessThan(1e-12) // north
+    expect(right.distanceTo(new Vector3(0, 1, 0))).toBeLessThan(1e-12) // east (+90°)
+  })
+
+  it('the camera rides along with the Moon when the date changes', () => {
+    const view = { longitude: 0.2, latitude: 0.1, altitude: 50_000, heading: 0, tilt: 0.5 }
+    const fixed = moonViewPoseFixed(view, MOON_RADIUS)
+    for (const hours of [0, 6, 24, 24 * 14]) {
+      const date = DATE + hours * 3600e3
+      const moon = moonAt(date)
+      const pose = moonPoseToECEF(fixed, moon)
+      expect(moon.altitudeOf(pose.position)).toBeCloseTo(view.altitude, 2)
+      const back = moonViewFromECEF(pose.position, pose.quaternion, moon, MOON_RADIUS)
+      expect(back.longitude).toBeCloseTo(view.longitude, 9)
+      expect(back.latitude).toBeCloseTo(view.latitude, 9)
+    }
+    expect(new Quaternion().angleTo(new Quaternion())).toBe(0)
+  })
+})

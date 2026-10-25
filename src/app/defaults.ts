@@ -10,6 +10,9 @@ export type Quality = (typeof QUALITIES)[number]
 /** 'realistic': area-integrated limb-darkened disk + physically based glare. 'takram': takram's own sky disk. */
 export const SUN_MODELS = ['realistic', 'takram'] as const
 export type SunModel = (typeof SUN_MODELS)[number]
+/** 'realistic': the true-scale Moon (position, size, photometry, eclipses). 'takram': takram's fixed-size sky disk. */
+export const MOON_MODELS = ['realistic', 'takram'] as const
+export type MoonModel = (typeof MOON_MODELS)[number]
 export const GLARE_LIMITS = { min: 0, max: 1.5 } as const
 export const CORONA_LIMITS = { min: 0, max: 1 } as const
 
@@ -38,6 +41,7 @@ export const DEFAULTS = {
   date: { dayOfYear: 1, timeOfDay: 8 },
   cloud: { enabled: true, quality: 'high' as Quality, coverage: 0.3, animate: false },
   sun: { model: 'realistic' as SunModel, glare: 0.1, corona: 0.5 },
+  moon: { model: 'realistic' as MoonModel },
   toneMapping: { mode: 'AgX' as ToneMappingName, exposure: 10 },
   atmosphere: { correctAltitude: true },
 } as const

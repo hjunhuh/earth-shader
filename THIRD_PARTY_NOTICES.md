@@ -1,5 +1,26 @@
 # Third-party notices
 
+## NASA CGI Moon Kit (Moon textures)
+
+`public/moon/` is derived from NASA's Scientific Visualization Studio
+"CGI Moon Kit" (Ernie Wright, 2019; https://svs.gsfc.nasa.gov/4720) by
+`scripts/prepare-moon-textures.mjs`:
+
+- `color.jpg`: `lroc_color_poles_4k.tif`, the Lunar Reconnaissance Orbiter
+  Camera (LROC) Wide Angle Camera color mosaic, converted to JPEG.
+- `slope_east.jpg`, `slope_north.jpg`: terrain slopes computed from
+  `ldem_16_uint.tif`, the Lunar Orbiter Laser Altimeter (LOLA) elevation
+  grid at 16 pixels per degree.
+
+NASA imagery and data are not subject to copyright in the United States
+(NASA Media Usage Guidelines). Credit: NASA's Scientific Visualization
+Studio; LRO LROC and LOLA teams.
+
+## astronomy-engine
+
+Sun and Moon ephemerides use `astronomy-engine` (MIT, Copyright (c) 2019–2023
+Donald Cross), the library `@takram/three-atmosphere` also uses.
+
 ## three-geospatial (takram)
 
 Rendering uses `@takram/three-atmosphere`, `@takram/three-clouds`,

@@ -5,9 +5,11 @@ import {
   CORONA_LIMITS,
   GLARE_LIMITS,
   LOCATION_LIMITS,
+  MOON_MODELS,
   QUALITIES,
   SUN_MODELS,
   TONE_MAPPING_MODES,
+  type MoonModel,
   type Quality,
   type SunModel,
   type ToneMappingName,
@@ -22,6 +24,7 @@ export interface AppState {
   date: { dayOfYear: number; timeOfDay: number }
   cloud: { enabled: boolean; quality: Quality; coverage: number; animate: boolean }
   sun: { model: SunModel; glare: number; corona: number }
+  moon: { model: MoonModel }
   toneMapping: { mode: ToneMappingName; exposure: number }
   atmosphere: { correctAltitude: boolean }
 }
@@ -37,6 +40,7 @@ export function createDefaultState(): AppState {
     date: { ...DEFAULTS.date },
     cloud: { ...DEFAULTS.cloud },
     sun: { ...DEFAULTS.sun },
+    moon: { ...DEFAULTS.moon },
     toneMapping: { ...DEFAULTS.toneMapping },
     atmosphere: { ...DEFAULTS.atmosphere },
   }
@@ -48,6 +52,7 @@ export function applyPatch(state: AppState, patch: StatePatch): AppState {
   const date = { ...state.date, ...patch.date }
   const cloud = { ...state.cloud, ...patch.cloud }
   const sun = { ...state.sun, ...patch.sun }
+  const moon = { ...state.moon, ...patch.moon }
   const tone = { ...state.toneMapping, ...patch.toneMapping }
   const atmosphere = { ...state.atmosphere, ...patch.atmosphere }
   return {
@@ -70,6 +75,9 @@ export function applyPatch(state: AppState, patch: StatePatch): AppState {
       model: (SUN_MODELS as readonly string[]).includes(sun.model) ? sun.model : state.sun.model,
       glare: clamp(finite(sun.glare, state.sun.glare), GLARE_LIMITS.min, GLARE_LIMITS.max),
       corona: clamp(finite(sun.corona, state.sun.corona), CORONA_LIMITS.min, CORONA_LIMITS.max),
+    },
+    moon: {
+      model: (MOON_MODELS as readonly string[]).includes(moon.model) ? moon.model : state.moon.model,
     },
     toneMapping: {
       mode: (TONE_MAPPING_MODES as readonly string[]).includes(tone.mode) ? tone.mode : state.toneMapping.mode,

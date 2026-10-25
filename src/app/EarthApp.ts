@@ -1,13 +1,22 @@
 import { Timer } from 'three'
 import { EarthScene } from '../scene/EarthScene'
 import { applyPatch, type AppState, type StatePatch } from './state'
-import { ControlPanel } from './ui'
-import type { TestConfig } from './urlState'
+import { ControlPanel, type NavigationHooks } from './ui'
+import type { StartView, TestConfig } from './urlState'
+
+/** 1234 m, 12.3 km, 384,400 km. */
+export function formatDistance(meters: number): string {
+  if (!Number.isFinite(meters)) return '–'
+  if (Math.abs(meters) < 1e4) return `${meters.toFixed(0)} m`
+  if (Math.abs(meters) < 1e6) return `${(meters / 1000).toFixed(1)} km`
+  return `${Math.round(meters / 1000).toLocaleString('en-US')} km`
+}
 
 export interface EarthAppOptions {
   canvas: HTMLCanvasElement
   state: AppState
   test: TestConfig
+  view?: StartView
   uiContainer?: HTMLElement
 }
 
@@ -21,7 +30,7 @@ export class EarthApp {
   private running = false
   private readonly resizeObserver: ResizeObserver
 
-  constructor({ canvas, state, test, uiContainer }: EarthAppOptions) {
+  constructor({ canvas, state, test, view, uiContainer }: EarthAppOptions) {
     this.canvas = canvas
     this.test = test
     if (test.size) {
@@ -29,7 +38,26 @@ export class EarthApp {
       canvas.style.height = `${test.size.height}px`
     }
     this.scene = new EarthScene({ canvas, state, test: test.enabled, ...(test.enabled ? { pixelRatio: test.dpr } : {}) })
-    this.panel = uiContainer ? new ControlPanel(uiContainer, state, (patch) => this.update(patch)) : null
+    const scene = this.scene
+    const navigation: NavigationHooks = {
+      flyTo: (body) => scene.flyTo(body),
+      info: {
+        get focus() {
+          return scene.flying ? 'flying…' : scene.focus
+        },
+        get altitude() {
+          return formatDistance(scene.altitude())
+        },
+        get moonDistance() {
+          return formatDistance(scene.camera.position.distanceTo(scene.moon.position))
+        },
+      },
+    }
+    this.panel = uiContainer ? new ControlPanel(uiContainer, state, (patch) => this.update(patch), navigation) : null
+    if (view?.focus === 'moon') {
+      const { altitude, longitude, latitude, heading, tilt } = view
+      scene.flyTo('moon', { instant: true, altitude, longitude, latitude, heading, tilt })
+    }
     this.resize()
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(canvas)

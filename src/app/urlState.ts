@@ -1,4 +1,13 @@
-import { QUALITIES, SUN_MODELS, TONE_MAPPING_MODES, type Quality, type SunModel, type ToneMappingName } from './defaults'
+import {
+  MOON_MODELS,
+  QUALITIES,
+  SUN_MODELS,
+  TONE_MAPPING_MODES,
+  type MoonModel,
+  type Quality,
+  type SunModel,
+  type ToneMappingName,
+} from './defaults'
 import { applyPatch, createDefaultState, type AppState, type StatePatch } from './state'
 
 export interface TestConfig {
@@ -12,9 +21,20 @@ export interface TestConfig {
   dpr: number
 }
 
+/** Start orbiting the Moon: `?focus=moon&moonAlt=&moonLon=&moonLat=&moonHeading=&moonTilt=` (meters / degrees). */
+export interface StartView {
+  focus: 'earth' | 'moon'
+  altitude?: number
+  longitude?: number
+  latitude?: number
+  heading?: number
+  tilt?: number
+}
+
 export interface ParsedUrl {
   state: AppState
   test: TestConfig
+  view: StartView
   errors: string[]
 }
 
@@ -42,7 +62,7 @@ function prune<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T
 }
 
-/** `?lon=&lat=&alt=&doy=&tod=&clouds=&quality=&coverage=&sun=&glare=&exposure=` plus test flags. */
+/** `?lon=&lat=&alt=&doy=&tod=&clouds=&quality=&coverage=&sun=&glare=&moon=&exposure=` plus the start view and test flags. */
 export function parseUrl(search: string): ParsedUrl {
   const params = new URLSearchParams(search)
   const errors: string[] = []
@@ -50,6 +70,8 @@ export function parseUrl(search: string): ParsedUrl {
   if (quality !== null && !(QUALITIES as readonly string[]).includes(quality)) errors.push(`quality: unknown "${quality}"`)
   const sunModel = params.get('sun')
   if (sunModel !== null && !(SUN_MODELS as readonly string[]).includes(sunModel)) errors.push(`sun: unknown "${sunModel}"`)
+  const moonModel = params.get('moon')
+  if (moonModel !== null && !(MOON_MODELS as readonly string[]).includes(moonModel)) errors.push(`moon: unknown "${moonModel}"`)
   const tone = params.get('tonemapping')
   if (tone !== null && !(TONE_MAPPING_MODES as readonly string[]).includes(tone)) errors.push(`tonemapping: unknown "${tone}"`)
 
@@ -70,6 +92,9 @@ export function parseUrl(search: string): ParsedUrl {
       model: sunModel !== null && (SUN_MODELS as readonly string[]).includes(sunModel) ? (sunModel as SunModel) : undefined,
       glare: number(params, 'glare', errors),
       corona: number(params, 'corona', errors),
+    }),
+    moon: prune({
+      model: moonModel !== null && (MOON_MODELS as readonly string[]).includes(moonModel) ? (moonModel as MoonModel) : undefined,
     }),
     toneMapping: prune({
       exposure: number(params, 'exposure', errors),
@@ -93,5 +118,15 @@ export function parseUrl(search: string): ParsedUrl {
     ui: params.get('ui') === '1',
     dpr: Math.min(4, Math.max(0.25, number(params, 'dpr', errors) ?? 1)),
   }
-  return { state, test, errors }
+  const focus = params.get('focus')
+  if (focus !== null && focus !== 'earth' && focus !== 'moon') errors.push(`focus: unknown "${focus}"`)
+  const view: StartView = prune({
+    focus: focus === 'moon' ? 'moon' : 'earth',
+    altitude: number(params, 'moonAlt', errors),
+    longitude: number(params, 'moonLon', errors),
+    latitude: number(params, 'moonLat', errors),
+    heading: number(params, 'moonHeading', errors),
+    tilt: number(params, 'moonTilt', errors),
+  }) as StartView
+  return { state, test, view, errors }
 }

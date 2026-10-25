@@ -47,6 +47,8 @@ uniform vec3 limbDarkening;
 uniform mat4 inverseProjection;
 uniform mat4 cameraMatrixWorld;
 uniform sampler2D visibilityBuffer;
+uniform vec3 moonCenter; // camera-relative, meters
+uniform float moonRadius;
 #ifdef HAS_OVERLAY
 uniform sampler2D overlayBuffer;
 #endif
@@ -59,6 +61,13 @@ float angleBetween(const vec3 a, const vec3 b) {
 vec3 viewRay(const vec2 uv) {
   vec4 p = inverseProjection * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
   return normalize(mat3(cameraMatrixWorld) * (p.xyz / p.w));
+}
+
+// The Moon is always in front of the Sun: a solar eclipse.
+bool behindMoon(const vec3 d) {
+  if (moonRadius <= 0.0) return false;
+  float distance = length(moonCenter);
+  return angleBetween(d, moonCenter / distance) < asin(min(1.0, moonRadius / distance));
 }
 
 float hash11(float p) {
@@ -111,8 +120,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
       for (int i = 0; i < 16; ++i) {
         if (i >= n) break;
         vec2 o = (vec2(float(i), float(j)) + 0.5) / float(n) - 0.5;
-        float t = angleBetween(normalize(direction + ddx * o.x + ddy * o.y), sunDirection) / angularRadius;
-        if (t < 1.0) {
+        vec3 d = normalize(direction + ddx * o.x + ddy * o.y);
+        float t = angleBetween(d, sunDirection) / angularRadius;
+        if (t < 1.0 && !behindMoon(d)) {
           float mu = sqrt(1.0 - t * t);
           intensity += 1.0 - limbDarkening * (1.0 - mu);
         }
@@ -146,7 +156,20 @@ uniform vec2 center;     // drawing-buffer pixels, origin bottom-left
 uniform float radius;    // disk radius in pixels
 uniform vec2 size;       // drawing-buffer size
 uniform int halfWindow;
+uniform mat4 inverseProjection;
+uniform mat4 cameraMatrixWorld;
+uniform vec3 moonCenter;
+uniform float moonRadius;
 layout(location = 0) out vec4 outputColor;
+
+bool behindMoon(const vec2 p) {
+  if (moonRadius <= 0.0) return false;
+  vec4 v = inverseProjection * vec4(p / size * 2.0 - 1.0, 1.0, 1.0);
+  vec3 d = normalize(mat3(cameraMatrixWorld) * (v.xyz / v.w));
+  float distance = length(moonCenter);
+  vec3 m = moonCenter / distance;
+  return 2.0 * asin(clamp(length(d - m) * 0.5, 0.0, 1.0)) < asin(min(1.0, moonRadius / distance));
+}
 
 void main() {
   float visible = 0.0;
@@ -158,14 +181,19 @@ void main() {
       vec2 p = base + vec2(float(i), float(j)) + 0.5;
       if (p.x < 0.0 || p.y < 0.0 || p.x >= size.x || p.y >= size.y) continue;
       float weight = 0.0;
+      float unoccluded = 0.0;
       for (int s = 0; s < 4; ++s) {
         vec2 o = vec2(float(s & 1), float(s >> 1)) * 0.5 - 0.25;
         float t = length(p + o - center) / radius;
-        if (t < 1.0) weight += 0.4 + 0.6 * sqrt(1.0 - t * t);
+        if (t < 1.0) {
+          float w = 0.4 + 0.6 * sqrt(1.0 - t * t);
+          weight += w;
+          if (!behindMoon(p + o)) unoccluded += w;
+        }
       }
       if (weight == 0.0) continue;
       vec2 uv = p / size;
-      float v = texture(depthBuffer, uv).r >= 1.0 - 1e-7 ? 1.0 : 0.0;
+      float v = texture(depthBuffer, uv).r >= 1.0 - 1e-7 ? unoccluded / weight : 0.0;
       #ifdef HAS_OVERLAY
       v *= 1.0 - texture(overlayBuffer, uv).a;
       #endif
@@ -198,6 +226,9 @@ export class SunEffect extends Effect {
   transmittanceTexture: Texture | null = null
   /** Clouds composited over the sky (CloudsEffect.atmosphereOverlay.map). */
   overlayMap: Texture | null = null
+  /** The Moon's center (ECEF) and radius; it eclipses the disk. Radius 0 = no Moon. */
+  readonly moonPosition = new Vector3()
+  moonRadius = 0
 
   /** Sun illuminance at the camera after atmospheric transmittance (relative luminance). */
   readonly illuminance = new Vector3()
@@ -232,6 +263,8 @@ export class SunEffect extends Effect {
         ['inverseProjection', new Uniform(new Matrix4())],
         ['cameraMatrixWorld', new Uniform(new Matrix4())],
         ['visibilityBuffer', new Uniform(null)],
+        ['moonCenter', new Uniform(new Vector3(0, 0, 1e10))],
+        ['moonRadius', new Uniform(0)],
         ['overlayBuffer', new Uniform(null)],
       ]),
     })
@@ -253,6 +286,10 @@ export class SunEffect extends Effect {
         radius: new Uniform(1),
         size: new Uniform(new Vector2(1, 1)),
         halfWindow: new Uniform(0),
+        inverseProjection: new Uniform(new Matrix4()),
+        cameraMatrixWorld: new Uniform(new Matrix4()),
+        moonCenter: new Uniform(new Vector3(0, 0, 1e10)),
+        moonRadius: new Uniform(0),
       },
       depthTest: false,
       depthWrite: false,
@@ -300,6 +337,13 @@ export class SunEffect extends Effect {
     u.get('sunDirection')!.value.copy(this.sunDirection)
     u.get('inverseProjection')!.value.copy(camera.projectionMatrixInverse)
     u.get('cameraMatrixWorld')!.value.copy(camera.matrixWorld)
+    const moonCenter = (u.get('moonCenter')!.value as Vector3).subVectors(this.moonPosition, camera.position)
+    u.get('moonRadius')!.value = this.moonRadius
+    const vm = this.visibilityMaterial.uniforms
+    vm.inverseProjection!.value.copy(camera.projectionMatrixInverse)
+    vm.cameraMatrixWorld!.value.copy(camera.matrixWorld)
+    vm.moonCenter!.value.copy(moonCenter)
+    vm.moonRadius!.value = this.moonRadius
 
     this.updateOverlay()
     this.updateIlluminance()
