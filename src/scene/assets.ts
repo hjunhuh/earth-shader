@@ -133,3 +133,46 @@ export async function loadMoonAssets(): Promise<MoonAssets> {
   ])
   return { colorTexture, slopeEastTexture, slopeNorthTexture }
 }
+
+/** Prepared by scripts/prepare-earth-textures.mjs. */
+const earthBase = `${import.meta.env.BASE_URL}earth/`
+export const EARTH_ASSET_URLS = {
+  /** NASA Blue Marble Next Generation, July 2004. */
+  blueMarble: `${earthBase}bluemarble.jpg`,
+  /** Where the sea is deeper than ~10–60 m (from Terrarium bathymetry). */
+  openSea: `${earthBase}opensea.png`,
+} as const
+
+export interface EarthMaps {
+  /** The whole-Earth map (simple cylindrical, sRGB) for the zoomed-out view and open sea. */
+  blueMarble: Texture
+  openSea: Texture
+}
+
+function loadGlobalMap(url: string, srgb: boolean): Promise<Texture> {
+  return new Promise((resolve, reject) => {
+    new TextureLoader().load(
+      url,
+      (texture) => {
+        texture.minFilter = LinearMipMapLinearFilter
+        texture.magFilter = LinearFilter
+        texture.wrapS = RepeatWrapping // longitude
+        texture.wrapT = ClampToEdgeWrapping
+        texture.anisotropy = 8
+        texture.colorSpace = srgb ? SRGBColorSpace : NoColorSpace
+        texture.needsUpdate = true
+        resolve(texture)
+      },
+      undefined,
+      reject,
+    )
+  })
+}
+
+export async function loadEarthMaps(): Promise<EarthMaps> {
+  const [blueMarble, openSea] = await Promise.all([
+    loadGlobalMap(EARTH_ASSET_URLS.blueMarble, true),
+    loadGlobalMap(EARTH_ASSET_URLS.openSea, false),
+  ])
+  return { blueMarble, openSea }
+}
