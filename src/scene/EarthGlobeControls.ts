@@ -31,6 +31,23 @@ export class EarthGlobeControls extends GlobeControls {
     this.maxDistance = GLOBE.maxDistance
   }
 
+  /** Stop any coasting from the last drag (before moving the camera programmatically). */
+  stopInertia(): void {
+    // The same resets GlobeControls does when a zoom moves the camera (untyped fields).
+    const self = this as unknown as {
+      dragInertia: { set(x: number, y: number, z: number): void }
+      rotationInertia: { set(x: number, y: number): void }
+      globeInertia: { identity(): void }
+      globeInertiaFactor: number
+      _dragBaselineSet: boolean
+    }
+    self.dragInertia.set(0, 0, 0)
+    self.rotationInertia.set(0, 0)
+    self.globeInertia.identity()
+    self.globeInertiaFactor = 0
+    self._dragBaselineSet = false
+  }
+
   override adjustCamera(camera: PerspectiveCamera): void {
     EnvironmentControls.prototype.adjustCamera.call(this, camera)
   }

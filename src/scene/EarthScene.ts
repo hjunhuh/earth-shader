@@ -57,6 +57,7 @@ import {
   createPose,
   earthNadirPose,
   flightPose,
+  geodeticUp,
   lookQuaternion,
   MoonControls,
   moonPoseToECEF,
@@ -66,6 +67,8 @@ import {
   type Focus,
   type MoonView,
   type Pose,
+  rotatePoseAbout,
+  viewHeading,
 } from './navigation'
 import { SceneNormalPass } from './NormalPass'
 import { Ocean } from './Ocean'
@@ -174,6 +177,8 @@ export class EarthScene {
   private appliedMoonModel: AppState['moon']['model'] | null = null
   private focusBody: Focus = 'earth'
   private flight: Flight | null = null
+  /** An animated turn of the Earth view about a vertical axis (resetNorth). */
+  private turn: { start: Pose; pivot: Vector3; up: Vector3; angle: number; t: number; duration: number } | null = null
   /** Where the camera left the Earth, to return to. */
   private earthPose: (Pose & { target: Vector3 }) | null = null
   private readonly canvas: HTMLCanvasElement
@@ -218,6 +223,9 @@ export class EarthScene {
 
     this.globeControls = new EarthGlobeControls(this.camera, earthControls === 'globe' ? canvas : null, this.terrain)
     this.globeControls.enabled = earthControls === 'globe'
+    // Grabbing the view stops a north-up turn in progress.
+    this.globeControls.addEventListener('start', () => (this.turn = null))
+    this.controls.addEventListener('start', () => (this.turn = null))
     if (test) this.globeControls.enableDamping = false // No inertia: inputs land in the frame they're given.
     this.scene.add(this.moon)
 
@@ -300,6 +308,7 @@ export class EarthScene {
     const l0 = prev.location
     const l1 = next.location
     if (l0.longitude !== l1.longitude || l0.latitude !== l1.latitude || l0.altitude !== l1.altitude) {
+      this.turn = null
       if (this.focusBody === 'earth' && this.flight == null) {
         const altitude = this.altitude('earth')
         applyLocation(this.camera, this.controls.target, this.locationLike())
@@ -607,6 +616,7 @@ export class EarthScene {
 
   /** Fly the camera to a body; it then orbits that body. */
   flyTo(body: Focus, options: FlyToOptions = {}): void {
+    this.turn = null
     const leavingEarth = this.focusBody === 'earth' && this.flight == null
     if (leavingEarth && body === 'moon') this.earthPose = { ...this.cameraPose(), target: this.controls.target.clone() }
     this.controls.enabled = false
@@ -677,11 +687,59 @@ export class EarthScene {
       return
     }
     if (this.focusBody === 'earth') {
-      if (this.earthControls === 'globe') this.globeControls.update(delta)
+      if (this.turn) this.stepTurn(delta)
+      else if (this.earthControls === 'globe') this.globeControls.update(delta)
       else this.controls.update()
     } else {
       const view = this.moonControls.update(delta)
       this.applyPose(moonPoseToECEF(moonViewPoseFixed(view, MOON_RADIUS), this.moon))
+    }
+  }
+
+  /**
+   * The point the Earth view turns around: the target (orbit controls), else
+   * the ground at the screen center, else the camera itself.
+   */
+  private viewPivot(result = new Vector3()): Vector3 {
+    if (this.earthControls === 'orbit') return result.copy(this.controls.target)
+    const forward = new Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion)
+    return Ellipsoid.WGS84.getIntersection(new Ray(this.camera.position.clone(), forward), result) ?? result.copy(this.camera.position)
+  }
+
+  /** Heading of the view (radians clockwise from north; the Moon's north when orbiting it). */
+  heading(): number {
+    if (this.flight) return 0
+    if (this.focusBody === 'moon') return this.moonControls.view.heading
+    return viewHeading(this.camera.quaternion, geodeticUp(this.viewPivot()))
+  }
+
+  /**
+   * Turn the view so north is up, keeping the point at the screen center, the
+   * distance and the tilt (Google Earth's compass). Animated over `duration`
+   * seconds; grabbing the view stops it.
+   */
+  resetNorth(duration = 0.8): void {
+    if (this.flight) return
+    if (this.focusBody === 'moon') {
+      this.moonControls.goal.heading = 0 // MoonControls eases there the short way.
+      return
+    }
+    const pivot = this.viewPivot()
+    const up = geodeticUp(pivot)
+    const angle = viewHeading(this.camera.quaternion, up)
+    if (Math.abs(angle) < 1e-6) return
+    this.globeControls.stopInertia()
+    this.turn = { start: this.cameraPose(), pivot, up, angle, t: 0, duration }
+  }
+
+  private stepTurn(delta: number): void {
+    const turn = this.turn!
+    turn.t = Math.min(1, turn.t + (turn.duration > 0 ? delta / turn.duration : 1))
+    const eased = turn.t * turn.t * (3 - 2 * turn.t)
+    this.applyPose(rotatePoseAbout(turn.start, turn.pivot, turn.up, turn.angle * eased))
+    if (turn.t >= 1) {
+      this.turn = null
+      if (this.earthControls === 'orbit') this.controls.update()
     }
   }
 
