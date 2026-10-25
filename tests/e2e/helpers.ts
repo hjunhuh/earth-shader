@@ -20,6 +20,9 @@ export async function open(
   await page.setViewportSize({ width, height })
   const query = new URLSearchParams({
     test: '1',
+    // The terrain streams OSM/elevation tiles from the network; terrain.spec.ts
+    // turns it on with local stand-ins.
+    terrain: '0',
     frames: String(frames),
     size: `${width}x${height}`,
     ...(ui ? { ui: '1' } : {}),
