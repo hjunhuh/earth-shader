@@ -1,0 +1,149 @@
+import { expect, test, type Page } from '@playwright/test'
+import { Geodetic } from '@takram/three-geospatial'
+import { Quaternion, Vector3 } from 'three'
+import { APP, open, renderFrames } from './helpers'
+
+/**
+ * The default Earth controls (Google Earth style): the app starts looking
+ * straight down at the location with the globe in the middle; a left drag
+ * turns the globe under the cursor, the wheel zooms, a right drag tilts.
+ * Terrain off, so no tiles are fetched; the controls then work on the WGS84
+ * ellipsoid.
+ */
+const LOCATION = { lon: 30, lat: 35 }
+const CENTER: [number, number] = [320, 180]
+
+async function openGlobe(page: Page, params: Record<string, string | number> = {}): Promise<void> {
+  await open(page, APP, { nav: 'globe', ...LOCATION, ...params }, { frames: 4 })
+  expect(await page.evaluate(() => window.__earth!.earthControls!())).toBe('globe')
+}
+
+interface View {
+  /** Geodetic height of the camera (m). */
+  altitude: number
+  /** Angle between the view direction and straight down (degrees). */
+  tilt: number
+  /** Geodetic point under the screen center (degrees). */
+  center: [number, number] | null
+}
+
+async function view(page: Page): Promise<View> {
+  const c = await page.evaluate(() => window.__earth!.camera())
+  const position = new Vector3(...(c.position as [number, number, number]))
+  const forward = new Vector3(0, 0, -1).applyQuaternion(new Quaternion(...(c.quaternion as [number, number, number, number])))
+  // The geodetic normal (straight down at any height), not the gradient at the camera.
+  const g = new Geodetic().setFromECEF(position)
+  const up = new Vector3(Math.cos(g.latitude) * Math.cos(g.longitude), Math.cos(g.latitude) * Math.sin(g.longitude), Math.sin(g.latitude))
+  const center = await page.evaluate(([x, y]) => window.__earth!.surfacePointAt!(x!, y!), CENTER)
+  return {
+    altitude: g.height,
+    tilt: (Math.acos(Math.min(1, -forward.dot(up))) * 180) / Math.PI,
+    center,
+  }
+}
+
+const pointAt = (page: Page, p: [number, number]) => page.evaluate(([x, y]) => window.__earth!.surfacePointAt!(x!, y!), p)
+
+async function drag(page: Page, from: [number, number], to: [number, number], button: 'left' | 'right' = 'left') {
+  await page.mouse.move(...from)
+  await page.mouse.down({ button })
+  for (let i = 1; i <= 12; ++i) {
+    await page.mouse.move(from[0] + ((to[0] - from[0]) * i) / 12, from[1] + ((to[1] - from[1]) * i) / 12)
+    await renderFrames(page, 1)
+  }
+  await page.mouse.up({ button })
+  await renderFrames(page, 2)
+}
+
+async function wheel(page: Page, at: [number, number], deltaY: number, times: number) {
+  await page.mouse.move(...at)
+  for (let i = 0; i < times; ++i) {
+    await page.mouse.wheel(0, deltaY)
+    await renderFrames(page, 1)
+  }
+  await renderFrames(page, 2)
+}
+
+/** Great-circle distance in degrees. */
+function separation(a: [number, number], b: [number, number]): number {
+  const r = Math.PI / 180
+  const cos =
+    Math.sin(a[1] * r) * Math.sin(b[1] * r) + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.cos((a[0] - b[0]) * r)
+  return Math.acos(Math.min(1, cos)) / r
+}
+
+test.describe('globe controls', () => {
+  test('start straight down over the location, the globe in the middle', async ({ page }) => {
+    await openGlobe(page)
+    const v = await view(page)
+    expect(v.tilt).toBeLessThan(0.01)
+    expect(v.altitude).toBeCloseTo(1e7, -3)
+    expect(separation(v.center!, [LOCATION.lon, LOCATION.lat])).toBeLessThan(0.01)
+    // The whole disk is in view: the screen edges look past the Earth.
+    expect(await pointAt(page, [5, 180])).toBeNull()
+    expect(await pointAt(page, [635, 180])).toBeNull()
+  })
+
+  test('a left drag turns the globe so the grabbed point follows the cursor', async ({ page }) => {
+    await openGlobe(page)
+    const from: [number, number] = [300, 170]
+    const to: [number, number] = [380, 210]
+    const grabbed = (await pointAt(page, from))!
+    const before = await view(page)
+    await drag(page, from, to)
+    const after = await view(page)
+    expect(separation(after.center!, before.center!), 'the globe turned').toBeGreaterThan(3)
+    expect(separation((await pointAt(page, to))!, grabbed), 'grabbed point under the cursor').toBeLessThan(1)
+    expect(Math.abs(after.altitude / before.altitude - 1)).toBeLessThan(0.05)
+  })
+
+  test('the wheel zooms in and out', async ({ page }) => {
+    await openGlobe(page)
+    const start = (await view(page)).altitude
+    await wheel(page, CENTER, -300, 12)
+    const zoomedIn = await view(page)
+    expect(zoomedIn.altitude).toBeLessThan(0.5 * start)
+    expect(separation(zoomedIn.center!, [LOCATION.lon, LOCATION.lat]), 'zoomed toward the cursor').toBeLessThan(0.5)
+    await wheel(page, CENTER, 300, 6)
+    expect((await view(page)).altitude).toBeGreaterThan(1.5 * zoomedIn.altitude)
+  })
+
+  test('a right drag tilts the view toward the horizon near the ground', async ({ page }) => {
+    await openGlobe(page)
+    await wheel(page, CENTER, -300, 34)
+    const low = await view(page)
+    expect(low.altitude).toBeLessThan(100_000)
+    expect(low.tilt).toBeLessThan(1)
+    await drag(page, [320, 300], [320, 150], 'right')
+    const tilted = await view(page)
+    expect(tilted.tilt).toBeGreaterThan(20)
+    expect(tilted.altitude).toBeGreaterThan(0)
+  })
+
+  test('a new location looks straight down at it from the same height', async ({ page }) => {
+    await openGlobe(page)
+    await wheel(page, CENTER, -300, 8)
+    const before = await view(page)
+    await page.evaluate(() => window.__earth!.setState!({ location: { longitude: 127, latitude: 37.5 } }))
+    await renderFrames(page, 2)
+    const after = await view(page)
+    expect(separation(after.center!, [127, 37.5])).toBeLessThan(0.01)
+    expect(after.tilt).toBeLessThan(0.01)
+    expect(after.altitude / before.altitude).toBeCloseTo(1, 2)
+  })
+
+  test('after a round trip to the Moon the globe view and its controls come back', async ({ page }) => {
+    await openGlobe(page)
+    await page.evaluate(() => window.__earth!.flyTo!('moon', { instant: true }))
+    await renderFrames(page, 2)
+    expect(await page.evaluate(() => window.__earth!.focus!())).toBe('moon')
+    await page.evaluate(() => window.__earth!.flyTo!('earth', { instant: true }))
+    await renderFrames(page, 2)
+    expect(await page.evaluate(() => window.__earth!.focus!())).toBe('earth')
+    const back = await view(page)
+    expect(back.tilt).toBeLessThan(0.01)
+    expect(separation(back.center!, [LOCATION.lon, LOCATION.lat])).toBeLessThan(0.01)
+    await drag(page, [300, 170], [380, 210])
+    expect(separation((await view(page)).center!, back.center!), 'drag still turns the globe').toBeGreaterThan(3)
+  })
+})
