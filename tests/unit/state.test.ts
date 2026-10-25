@@ -57,6 +57,14 @@ describe('URL', () => {
     expect(state.terrain).toEqual({ enabled: false, heightScale: 2.5, brightness: 0.4 })
   })
 
+  it('picks the Earth controls (globe by default)', () => {
+    expect(parseUrl('').view.earthControls).toBe('globe')
+    expect(parseUrl('?nav=orbit').view.earthControls).toBe('orbit')
+    const bad = parseUrl('?nav=fly')
+    expect(bad.view.earthControls).toBe('globe')
+    expect(bad.errors).toEqual(['nav: unknown "fly"'])
+  })
+
   it('reports bad values and keeps defaults', () => {
     const { state, errors } = parseUrl('?lon=abc&quality=max&clouds=maybe&size=big')
     expect(errors).toHaveLength(4)

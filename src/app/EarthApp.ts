@@ -37,7 +37,13 @@ export class EarthApp {
       canvas.style.width = `${test.size.width}px`
       canvas.style.height = `${test.size.height}px`
     }
-    this.scene = new EarthScene({ canvas, state, test: test.enabled, ...(test.enabled ? { pixelRatio: test.dpr } : {}) })
+    this.scene = new EarthScene({
+      canvas,
+      state,
+      test: test.enabled,
+      earthControls: view?.earthControls ?? 'globe',
+      ...(test.enabled ? { pixelRatio: test.dpr } : {}),
+    })
     const scene = this.scene
     const navigation: NavigationHooks = {
       flyTo: (body) => scene.flyTo(body),

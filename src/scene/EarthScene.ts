@@ -34,18 +34,30 @@ import { CloudsEffect, type CloudsEffectChangeEvent } from '@takram/three-clouds
 import { Ellipsoid, Geodetic, PointOfView, radians } from '@takram/three-geospatial'
 import { DitheringEffect, LensFlareEffect } from '@takram/three-geospatial-effects'
 import { applyLocation } from '../app/applyLocation'
-import { CAMERA, CLOUD_SHADOW_MAX_FAR, CONTROLS, TERRAIN, type Quality, type ToneMappingName } from '../app/defaults'
+import {
+  CAMERA,
+  CLOUD_SHADOW_MAX_FAR,
+  CONTROLS,
+  GLOBE,
+  TERRAIN,
+  type EarthControlsName,
+  type Quality,
+  type ToneMappingName,
+} from '../app/defaults'
 import { localDateMs } from '../app/localDate'
 import { Spring } from '../app/spring'
 import type { AppState } from '../app/state'
 import { loadCloudAssets, loadMoonAssets, type CloudAssets, type MoonAssets } from './assets'
 import { applyCloudShadowFade } from './cloudShadowFade'
+import { EarthGlobeControls } from './EarthGlobeControls'
 import { Moon } from './Moon'
 import { MoonEffect } from './MoonEffect'
 import { MOON_RADIUS } from './moonModel'
 import {
   createPose,
+  earthNadirPose,
   flightPose,
+  lookQuaternion,
   MoonControls,
   moonPoseToECEF,
   moonViewFromECEF,
@@ -102,6 +114,8 @@ export interface EarthSceneOptions {
   test?: boolean
   /** Device pixel ratio; defaults to min(devicePixelRatio, 2) like R3F (1 in test mode). */
   pixelRatio?: number
+  /** How the camera moves around the Earth (default 'globe'). */
+  earthControls?: EarthControlsName
 }
 
 /**
@@ -118,7 +132,11 @@ export interface EarthSceneOptions {
 export class EarthScene {
   readonly renderer: WebGLRenderer
   readonly camera: PerspectiveCamera
+  /** The story's orbit controls (Earth focus with earthControls 'orbit'). */
   readonly controls: OrbitControls
+  /** Google Earth style controls (Earth focus with earthControls 'globe'). */
+  readonly globeControls: EarthGlobeControls
+  readonly earthControls: EarthControlsName
   readonly scene = new Scene()
   readonly ocean = new Ocean()
   /** OpenStreetMap on real elevation; lit by the aerial perspective through `normalPass`. */
@@ -166,8 +184,9 @@ export class EarthScene {
   readonly ready: Promise<void>
   frame = 0
 
-  constructor({ canvas, state, test = false, pixelRatio }: EarthSceneOptions) {
+  constructor({ canvas, state, test = false, pixelRatio, earthControls = 'globe' }: EarthSceneOptions) {
     this.state = state
+    this.earthControls = earthControls
     this.test = test
     this.canvas = canvas
 
@@ -190,11 +209,16 @@ export class EarthScene {
     this.controls = new OrbitControls(this.camera)
     this.controls.enableDamping = CONTROLS.enableDamping
     this.controls.minDistance = CONTROLS.minDistance
-    this.controls.connect(canvas)
+    if (earthControls === 'orbit') this.controls.connect(canvas)
+    else this.controls.enabled = false
 
     this.scene.add(this.ocean)
     this.terrain = new Terrain({ heightScale: state.terrain.heightScale, brightness: state.terrain.brightness })
     this.scene.add(this.terrain.group)
+
+    this.globeControls = new EarthGlobeControls(this.camera, earthControls === 'globe' ? canvas : null, this.terrain)
+    this.globeControls.enabled = earthControls === 'globe'
+    if (test) this.globeControls.enableDamping = false // No inertia: inputs land in the frame they're given.
     this.scene.add(this.moon)
 
     this.moonControls = new MoonControls(MOON_RADIUS, () => this.camera.fov * DEG)
@@ -241,6 +265,7 @@ export class EarthScene {
     this.renderer.toneMappingExposure = state.toneMapping.exposure
 
     applyLocation(this.camera, this.controls.target, this.locationLike())
+    if (earthControls === 'globe') this.applyPose(this.locationNadirPose(GLOBE.initialAltitude))
     this.applyState(state, true)
     this.updateEphemeris()
 
@@ -276,7 +301,10 @@ export class EarthScene {
     const l1 = next.location
     if (l0.longitude !== l1.longitude || l0.latitude !== l1.latitude || l0.altitude !== l1.altitude) {
       if (this.focusBody === 'earth' && this.flight == null) {
+        const altitude = this.altitude('earth')
         applyLocation(this.camera, this.controls.target, this.locationLike())
+        // Globe: look straight down at the new location from the same height.
+        if (this.earthControls === 'globe') this.applyPose(this.locationNadirPose(altitude))
       } else {
         this.earthPose = null // Return to the new location instead.
       }
@@ -543,8 +571,19 @@ export class EarthScene {
     this.camera.updateMatrixWorld()
   }
 
+  /** Straight down at the panel's location from `altitude` meters, north up. */
+  private locationNadirPose(altitude: number): Pose {
+    const { longitude, latitude } = this.state.location
+    return earthNadirPose(longitude * DEG, latitude * DEG, altitude)
+  }
+
   /** The default view of the panel's location (what the app starts with). */
   private defaultEarthPose(): Pose & { target: Vector3 } {
+    if (this.earthControls === 'globe') {
+      const target = new Vector3()
+      applyLocation(new PerspectiveCamera(), target, this.locationLike())
+      return { ...this.locationNadirPose(GLOBE.initialAltitude), target }
+    }
     const camera = new PerspectiveCamera()
     camera.position.set(...CAMERA.initialPosition)
     const target = new Vector3()
@@ -571,6 +610,7 @@ export class EarthScene {
     const leavingEarth = this.focusBody === 'earth' && this.flight == null
     if (leavingEarth && body === 'moon') this.earthPose = { ...this.cameraPose(), target: this.controls.target.clone() }
     this.controls.enabled = false
+    this.globeControls.enabled = false
     this.moonControls.enabled = false
 
     let end: () => Pose
@@ -595,9 +635,14 @@ export class EarthScene {
       end = () => pose
       arrive = () => {
         this.controls.target.copy(pose.target)
-        this.controls.enabled = true
         this.applyPose(pose)
-        this.controls.update()
+        if (this.earthControls === 'globe') {
+          this.globeControls.resetState()
+          this.globeControls.enabled = true
+        } else {
+          this.controls.enabled = true
+          this.controls.update()
+        }
       }
     }
 
@@ -632,7 +677,8 @@ export class EarthScene {
       return
     }
     if (this.focusBody === 'earth') {
-      this.controls.update()
+      if (this.earthControls === 'globe') this.globeControls.update(delta)
+      else this.controls.update()
     } else {
       const view = this.moonControls.update(delta)
       this.applyPose(moonPoseToECEF(moonViewPoseFixed(view, MOON_RADIUS), this.moon))
@@ -647,7 +693,14 @@ export class EarthScene {
     if (this.focusBody !== 'earth' || this.flight) return
     const d = direction.clone().normalize()
     this.controls.target.copy(this.camera.position).addScaledVector(d, CONTROLS.minDistance)
-    this.controls.update()
+    if (this.earthControls === 'globe') {
+      const up = Ellipsoid.WGS84.getSurfaceNormal(this.camera.position, new Vector3())
+      lookQuaternion(d, up, this.camera.quaternion)
+      this.camera.up.copy(up)
+      this.camera.updateMatrixWorld()
+    } else {
+      this.controls.update()
+    }
   }
 
   /** Current Moon view (when orbiting the Moon), e.g. to hand a flight over. */
@@ -683,6 +736,7 @@ export class EarthScene {
     this.moonEffect.dispose()
     if (this.moonAssets) for (const t of Object.values(this.moonAssets)) t.dispose()
     this.controls.dispose()
+    this.globeControls.dispose()
     this.clouds?.dispose()
     this.terrain.dispose()
     this.normalPass.dispose()

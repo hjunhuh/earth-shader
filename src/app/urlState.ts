@@ -1,8 +1,10 @@
 import {
+  EARTH_CONTROLS,
   MOON_MODELS,
   QUALITIES,
   SUN_MODELS,
   TONE_MAPPING_MODES,
+  type EarthControlsName,
   type MoonModel,
   type Quality,
   type SunModel,
@@ -21,9 +23,13 @@ export interface TestConfig {
   dpr: number
 }
 
-/** Start orbiting the Moon: `?focus=moon&moonAlt=&moonLon=&moonLat=&moonHeading=&moonTilt=` (meters / degrees). */
+/**
+ * Start orbiting the Moon: `?focus=moon&moonAlt=&moonLon=&moonLat=&moonHeading=&moonTilt=` (meters / degrees).
+ * Earth controls: `?nav=globe|orbit`.
+ */
 export interface StartView {
   focus: 'earth' | 'moon'
+  earthControls: EarthControlsName
   altitude?: number
   longitude?: number
   latitude?: number
@@ -123,10 +129,13 @@ export function parseUrl(search: string): ParsedUrl {
     ui: params.get('ui') === '1',
     dpr: Math.min(4, Math.max(0.25, number(params, 'dpr', errors) ?? 1)),
   }
+  const nav = params.get('nav')
+  if (nav !== null && !(EARTH_CONTROLS as readonly string[]).includes(nav)) errors.push(`nav: unknown "${nav}"`)
   const focus = params.get('focus')
   if (focus !== null && focus !== 'earth' && focus !== 'moon') errors.push(`focus: unknown "${focus}"`)
   const view: StartView = prune({
     focus: focus === 'moon' ? 'moon' : 'earth',
+    earthControls: nav === 'orbit' ? 'orbit' : 'globe',
     altitude: number(params, 'moonAlt', errors),
     longitude: number(params, 'moonLon', errors),
     latitude: number(params, 'moonLat', errors),
