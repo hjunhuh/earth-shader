@@ -39,6 +39,7 @@ import { localDateMs } from '../app/localDate'
 import { Spring } from '../app/spring'
 import type { AppState } from '../app/state'
 import { loadCloudAssets, loadMoonAssets, type CloudAssets, type MoonAssets } from './assets'
+import { applyCloudShadowFade } from './cloudShadowFade'
 import { Moon } from './Moon'
 import { MoonEffect } from './MoonEffect'
 import { MOON_RADIUS } from './moonModel'
@@ -198,15 +199,17 @@ export class EarthScene {
     this.composer.addPass(new RenderPass(this.scene, this.camera))
 
     this.generator = applyScatteringLutFix(new PrecomputedTexturesGenerator(this.renderer))
-    this.aerialPerspective = applySpaceViewFix(
-      new AerialPerspectiveEffect(this.camera, {
-        ...aerialPerspectiveEffectOptionsDefaults,
-        ...this.generator.textures,
-        sky: true,
-        sunLight: true,
-        skyLight: true,
-        correctAltitude: state.atmosphere.correctAltitude,
-      }),
+    this.aerialPerspective = applyCloudShadowFade(
+      applySpaceViewFix(
+        new AerialPerspectiveEffect(this.camera, {
+          ...aerialPerspectiveEffectOptionsDefaults,
+          ...this.generator.textures,
+          sky: true,
+          sunLight: true,
+          skyLight: true,
+          correctAltitude: state.atmosphere.correctAltitude,
+        }),
+      ),
     )
 
     this.sun = new SunEffect(this.camera, {
