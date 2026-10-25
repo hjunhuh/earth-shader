@@ -44,6 +44,10 @@ export interface EarthTestApi {
   aim?(direction: number[]): void
   /** Moon's center and apparent radius in CSS pixels. */
   projectMoon?(): { x: number; y: number; radius: number; inFront: boolean }
+  /** The app only: 0–1 share of requested terrain tiles loaded. */
+  terrainProgress?(): number
+  /** Loaded ground height (m × exaggeration) at a point in degrees, or null. */
+  elevationAt?(longitude: number, latitude: number): number | null
 }
 
 /** Project an ECEF point (float64, camera-relative) to CSS pixels; radius is the Moon's apparent radius. */

@@ -54,6 +54,8 @@ if (parsed.test.enabled) {
   api.moonView = () => scene.moonView()
   api.aim = (direction) => scene.aim(new Vector3(...(direction as [number, number, number])))
   api.projectMoon = () => projectPoint(scene.camera, scene.moon.position, api.size())
+  api.terrainProgress = () => scene.terrain.loadProgress
+  api.elevationAt = (lon, lat) => scene.terrain.elevationAt((lat * Math.PI) / 180, (lon * Math.PI) / 180)
   window.__earth = api
   ;(window as unknown as { __earthApp: EarthApp }).__earthApp = app // internals, for debugging probes
   scene.ready
