@@ -1,4 +1,6 @@
+import { Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
+import { liftAboveGround } from '../../src/scene/Terrain'
 import { OSM_WATER_LINEAR, OSM_WATER_SRGB, srgbToLinear, waterWeight } from '../../src/scene/terrainMath'
 
 const linear = (hex: number) => [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255].map((c) => srgbToLinear(c / 255)) as [number, number, number]
@@ -21,5 +23,20 @@ describe('OSM water detection', () => {
     const quarter = OSM_WATER_LINEAR.map((w, i) => w * 0.97 + linear(0xf2efe9)[i]! * 0.03) as [number, number, number]
     expect(waterWeight(half)).toBe(0)
     expect(waterWeight(quarter)).toBeGreaterThan(0.5)
+  })
+})
+
+describe('liftAboveGround', () => {
+  it('raises a camera below the clearance along up', () => {
+    const p = new Vector3(0, 0, 6_400_000)
+    expect(liftAboveGround(p, new Vector3(0, 0, 1), 1000, 1200, 30)).toBe(true)
+    expect(p.z).toBe(6_400_230)
+  })
+
+  it('leaves a camera with enough clearance', () => {
+    const p = new Vector3(0, 0, 6_400_000)
+    expect(liftAboveGround(p, new Vector3(0, 0, 1), 1000, 900, 30)).toBe(false)
+    expect(liftAboveGround(p, new Vector3(0, 0, 1), 1000, Number.NaN, 30)).toBe(false)
+    expect(p.z).toBe(6_400_000)
   })
 })
