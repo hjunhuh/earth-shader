@@ -21,6 +21,7 @@
     "@takram/three-clouds": "0.7.6",
     "@takram/three-geospatial": "0.9.1",
     "@takram/three-geospatial-effects": "0.6.4",
+    "3d-tiles-renderer": "0.5.3",
     "astronomy-engine": "2.1.19",
     "lil-gui": "0.21.0",
     "postprocessing": "6.39.1",
