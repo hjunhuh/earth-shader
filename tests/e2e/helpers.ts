@@ -20,6 +20,12 @@ export async function open(
   await page.setViewportSize({ width, height })
   const query = new URLSearchParams({
     test: '1',
+    // The terrain streams imagery/elevation tiles from the network;
+    // terrain.spec.ts turns it on with local stand-ins.
+    terrain: '0',
+    // The takram story's orbit controls, which the parity tests compare
+    // against; globe.spec.ts covers the default globe controls.
+    nav: 'orbit',
     frames: String(frames),
     size: `${width}x${height}`,
     ...(ui ? { ui: '1' } : {}),

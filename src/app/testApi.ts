@@ -1,5 +1,7 @@
-import { Quaternion, type PerspectiveCamera, type Vector3, type WebGLRenderer } from 'three'
+import { Quaternion, Vector3, type PerspectiveCamera, type WebGLRenderer } from 'three'
 import { PointOfView, radians } from '@takram/three-geospatial'
+import type { FlyToOptions } from '../scene/EarthScene'
+import type { Focus, MoonView } from '../scene/navigation'
 import type { AppState, StatePatch } from './state'
 
 /**
@@ -32,6 +34,46 @@ export interface EarthTestApi {
   pixelRatio(): number
   getState?(): AppState
   setState?(patch: StatePatch): void
+  /** The app only: true-scale Moon and navigation. */
+  flyTo?(body: Focus, options?: FlyToOptions): void
+  focus?(): Focus
+  /** Moon's center in ECEF meters. */
+  moonPosition?(): number[]
+  moonView?(): MoonView
+  /** Earth focus: look along an ECEF direction from where the camera is. */
+  aim?(direction: number[]): void
+  /** Moon's center and apparent radius in CSS pixels. */
+  projectMoon?(): { x: number; y: number; radius: number; inFront: boolean }
+  /** The app only: 0–1 share of requested terrain tiles loaded. */
+  terrainProgress?(): number
+  /** Loaded ground height (m × exaggeration) at a point in degrees, or null. */
+  elevationAt?(longitude: number, latitude: number): number | null
+  /** View heading in degrees clockwise from north (the compass). */
+  heading?(): number
+  /** 'globe' or 'orbit' (`?nav=`). */
+  earthControls?(): string
+  /** Longitude/latitude (degrees) of the WGS84 ellipsoid under a CSS pixel, or null off the globe. */
+  surfacePointAt?(x: number, y: number): [number, number] | null
+}
+
+/** Project an ECEF point (float64, camera-relative) to CSS pixels; radius is the Moon's apparent radius. */
+export function projectPoint(
+  camera: PerspectiveCamera,
+  point: Vector3,
+  size: { width: number; height: number },
+  bodyRadius = 1737400,
+): { x: number; y: number; radius: number; inFront: boolean } {
+  camera.updateMatrixWorld()
+  const view = point.clone().sub(camera.position).applyQuaternion(camera.quaternion.clone().invert())
+  const inFront = view.z < 0
+  const focal = size.height / 2 / Math.tan((camera.fov * Math.PI) / 360)
+  const distance = view.length()
+  return {
+    x: size.width / 2 + (focal * view.x) / -view.z,
+    y: size.height / 2 - (focal * view.y) / -view.z,
+    radius: focal * Math.tan(Math.asin(Math.min(1, bodyRadius / distance))),
+    inFront,
+  }
 }
 
 export interface TestTarget {

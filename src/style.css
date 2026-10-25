@@ -16,10 +16,66 @@ body {
 #earth:active {
   cursor: grabbing;
 }
+/* The globe controls focus the canvas on pointerdown (for keyboard input);
+   don't draw the browser's focus ring around the whole view. */
+#earth:focus {
+  outline: none;
+}
 #ui {
   position: fixed;
   top: 8px;
   right: 8px;
+}
+/* Bottom-left: the panel can run the full height of the right side. */
+#compass {
+  position: fixed;
+  left: 12px;
+  bottom: 64px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.25);
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.55);
+  cursor: pointer;
+}
+#compass:hover {
+  background: rgb(40 40 40 / 0.75);
+}
+#compass:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+#compass .needle {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+#compass text {
+  fill: #fff;
+  font: 600 9px system-ui, sans-serif;
+}
+#compass .north {
+  fill: #e5483b;
+}
+#compass .south {
+  fill: #ddd;
+}
+#attribution {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  padding: 2px 6px;
+  background: rgb(0 0 0 / 0.5);
+  color: #ccc;
+  font-size: 11px;
+  line-height: 1.4;
+}
+#attribution a {
+  color: #fff;
+}
+#attribution[hidden] {
+  display: none;
 }
 #error {
   position: fixed;

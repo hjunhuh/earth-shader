@@ -1,5 +1,55 @@
 # Third-party notices
 
+## NASA CGI Moon Kit (Moon textures)
+
+`public/moon/` is derived from NASA's Scientific Visualization Studio
+"CGI Moon Kit" (Ernie Wright, 2019; https://svs.gsfc.nasa.gov/4720) by
+`scripts/prepare-moon-textures.mjs`:
+
+- `color.jpg`: `lroc_color_poles_4k.tif`, the Lunar Reconnaissance Orbiter
+  Camera (LROC) Wide Angle Camera color mosaic, converted to JPEG.
+- `slope_east.jpg`, `slope_north.jpg`: terrain slopes computed from
+  `ldem_16_uint.tif`, the Lunar Orbiter Laser Altimeter (LOLA) elevation
+  grid at 16 pixels per degree.
+
+NASA imagery and data are not subject to copyright in the United States
+(NASA Media Usage Guidelines). Credit: NASA's Scientific Visualization
+Studio; LRO LROC and LOLA teams.
+
+## Sentinel-2 cloudless 2016 (satellite imagery)
+
+The terrain is textured with EOX's Sentinel-2 cloudless mosaic of 2016
+(layer `s2cloudless_3857`, https://cloudless.eox.at), streamed at runtime and
+not redistributed here: "EOxCloudless https://cloudless.eox.at by EOX IT
+Services GmbH (Contains modified Copernicus Sentinel data 2016)", released
+under the Creative Commons Attribution 4.0 International License
+(https://creativecommons.org/licenses/by/4.0/). The app shows this credit on
+screen while the terrain is on. Later EOX mosaics (2018 onward) are CC BY-NC-SA
+and are not used.
+
+## Terrain Tiles (elevation)
+
+Elevation is streamed from the Terrain Tiles on AWS (Mapzen/Tilezen "Joerd",
+Terrarium encoding, https://registry.opendata.aws/terrain-tiles/). Sources and
+their credits, listed at
+https://github.com/tilezen/joerd/blob/master/docs/attribution.md, include:
+3DEP, SRTM and GMTED2010 data courtesy of the U.S. Geological Survey; ETOPO1
+(NOAA); Copernicus EU-DEM; and regional data from LINZ, Kartverket, Geoscience
+Australia, INEGI, Natural Resources Canada (Open Government Licence – Canada),
+the UK Environment Agency and ArcticDEM.
+
+## 3d-tiles-renderer
+
+The terrain's tiling, level of detail and displacement come from
+`3d-tiles-renderer` (NASA-AMMOS/3DTilesRendererJS, Apache License 2.0) as an
+npm dependency. `src/scene/Terrain.ts` adapts the bump-mapping GLSL of its
+`TerrainLambertMaterial`.
+
+## astronomy-engine
+
+Sun and Moon ephemerides use `astronomy-engine` (MIT, Copyright (c) 2019–2023
+Donald Cross), the library `@takram/three-atmosphere` also uses.
+
 ## three-geospatial (takram)
 
 Rendering uses `@takram/three-atmosphere`, `@takram/three-clouds`,

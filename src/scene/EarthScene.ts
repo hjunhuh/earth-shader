@@ -8,7 +8,19 @@ import {
   ToneMappingMode,
   type Effect,
 } from 'postprocessing'
-import { HalfFloatType, Matrix4, NoToneMapping, PerspectiveCamera, Quaternion, Scene, Vector3, WebGLRenderer } from 'three'
+import {
+  HalfFloatType,
+  Matrix4,
+  NoToneMapping,
+  PerspectiveCamera,
+  Quaternion,
+  Ray,
+  Scene,
+  Sphere,
+  Vector2,
+  Vector3,
+  WebGLRenderer,
+} from 'three'
 import { OrbitControls } from 'three-stdlib'
 import {
   AerialPerspectiveEffect,
@@ -19,19 +31,53 @@ import {
   PrecomputedTexturesGenerator,
 } from '@takram/three-atmosphere'
 import { CloudsEffect, type CloudsEffectChangeEvent } from '@takram/three-clouds'
-import { Geodetic, PointOfView, radians } from '@takram/three-geospatial'
+import { Ellipsoid, Geodetic, PointOfView, radians } from '@takram/three-geospatial'
 import { DitheringEffect, LensFlareEffect } from '@takram/three-geospatial-effects'
 import { applyLocation } from '../app/applyLocation'
-import { CAMERA, CLOUD_SHADOW_MAX_FAR, CONTROLS, type Quality, type ToneMappingName } from '../app/defaults'
+import {
+  CAMERA,
+  CLOUD_SHADOW_MAX_FAR,
+  CONTROLS,
+  GLOBE,
+  TERRAIN,
+  type EarthControlsName,
+  type Quality,
+  type ToneMappingName,
+} from '../app/defaults'
 import { localDateMs } from '../app/localDate'
 import { Spring } from '../app/spring'
 import type { AppState } from '../app/state'
-import { loadCloudAssets, type CloudAssets } from './assets'
+import { loadCloudAssets, loadMoonAssets, type CloudAssets, type MoonAssets } from './assets'
+import { applyCloudShadowFade } from './cloudShadowFade'
+import { EarthGlobeControls } from './EarthGlobeControls'
+import { Moon } from './Moon'
+import { MoonEffect } from './MoonEffect'
+import { MOON_RADIUS } from './moonModel'
+import {
+  createPose,
+  earthNadirPose,
+  flightPose,
+  geodeticUp,
+  lookQuaternion,
+  MoonControls,
+  moonPoseToECEF,
+  moonViewFromECEF,
+  moonViewPoseFixed,
+  type FlightEnds,
+  type Focus,
+  type MoonView,
+  type Pose,
+  rotatePoseAbout,
+  viewHeading,
+} from './navigation'
+import { SceneNormalPass } from './NormalPass'
 import { Ocean } from './Ocean'
-import { clipPlanes } from './oceanMath'
+import { clipPlanes, WGS84_A } from './oceanMath'
 import { groupEffects } from './passes'
+import { applyScatteringLutFix } from './scatteringLutFix'
 import { applySpaceViewFix } from './spaceViewFix'
 import { SunEffect } from './SunEffect'
+import { liftAboveGround, Terrain } from './Terrain'
 
 export const TONE_MAPPING: Record<ToneMappingName, ToneMappingMode> = {
   AgX: ToneMappingMode.AGX,
@@ -41,6 +87,29 @@ export const TONE_MAPPING: Record<ToneMappingName, ToneMappingMode> = {
   Linear: ToneMappingMode.LINEAR,
 }
 
+export interface FlyToOptions {
+  /** Jump there without the flight animation. */
+  instant?: boolean
+  /** Seconds (default 7). */
+  duration?: number
+  /** Moon only: the view to arrive at (degrees / meters); defaults to the sunlit side from 2 radii up. */
+  longitude?: number
+  latitude?: number
+  altitude?: number
+  heading?: number
+  tilt?: number
+}
+
+interface Flight {
+  to: Focus
+  t: number
+  duration: number
+  ends: () => FlightEnds
+  arrive: () => void
+}
+
+const DEG = Math.PI / 180
+
 export interface EarthSceneOptions {
   canvas: HTMLCanvasElement
   state: AppState
@@ -48,6 +117,8 @@ export interface EarthSceneOptions {
   test?: boolean
   /** Device pixel ratio; defaults to min(devicePixelRatio, 2) like R3F (1 in test mode). */
   pixelRatio?: number
+  /** How the camera moves around the Earth (default 'globe'). */
+  earthControls?: EarthControlsName
 }
 
 /**
@@ -64,13 +135,24 @@ export interface EarthSceneOptions {
 export class EarthScene {
   readonly renderer: WebGLRenderer
   readonly camera: PerspectiveCamera
+  /** The story's orbit controls (Earth focus with earthControls 'orbit'). */
   readonly controls: OrbitControls
+  /** Google Earth style controls (Earth focus with earthControls 'globe'). */
+  readonly globeControls: EarthGlobeControls
+  readonly earthControls: EarthControlsName
   readonly scene = new Scene()
   readonly ocean = new Ocean()
+  /** OpenStreetMap on real elevation; lit by the aerial perspective through `normalPass`. */
+  readonly terrain: Terrain
+  readonly normalPass: SceneNormalPass
   readonly composer: EffectComposer
   readonly generator: PrecomputedTexturesGenerator
   readonly aerialPerspective: AerialPerspectiveEffect
   readonly sun: SunEffect
+  /** The Moon at its true position and size, and its renderer. */
+  readonly moon = new Moon()
+  readonly moonEffect: MoonEffect
+  readonly moonControls: MoonControls
   readonly lensFlare = new LensFlareEffect()
   readonly toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.AGX })
   readonly smaa = new SMAAEffect()
@@ -79,7 +161,7 @@ export class EarthScene {
 
   readonly sunDirection = new Vector3()
   readonly moonDirection = new Vector3()
-  private readonly inertialToECEF = new Matrix4()
+  readonly inertialToECEF = new Matrix4()
   private readonly worldToECEF = new Matrix4() // World space is ECEF.
 
   private state: AppState
@@ -88,18 +170,30 @@ export class EarthScene {
   private readonly dayOfYear: Spring
   private readonly timeOfDay: Spring
   private assets: CloudAssets | null = null
+  private moonAssets: MoonAssets | null = null
   private effectPasses: EffectPass[] = []
   private appliedQuality: Quality | null = null
   private appliedSunModel: AppState['sun']['model'] | null = null
+  private appliedMoonModel: AppState['moon']['model'] | null = null
+  private focusBody: Focus = 'earth'
+  private flight: Flight | null = null
+  /** An animated turn of the Earth view about a vertical axis (resetNorth). */
+  private turn: { start: Pose; pivot: Vector3; up: Vector3; angle: number; t: number; duration: number } | null = null
+  /** Where the camera left the Earth, to return to. */
+  private earthPose: (Pose & { target: Vector3 }) | null = null
+  private readonly canvas: HTMLCanvasElement
+  private readonly onDoubleClick = (event: MouseEvent) => this.pick(event)
   private disposed = false
 
   /** Resolves when the atmosphere LUTs and cloud textures are ready. */
   readonly ready: Promise<void>
   frame = 0
 
-  constructor({ canvas, state, test = false, pixelRatio }: EarthSceneOptions) {
+  constructor({ canvas, state, test = false, pixelRatio, earthControls = 'globe' }: EarthSceneOptions) {
     this.state = state
+    this.earthControls = earthControls
     this.test = test
+    this.canvas = canvas
 
     // R3F Canvas defaults with gl={{ depth: false }}.
     this.renderer = new WebGLRenderer({
@@ -120,23 +214,47 @@ export class EarthScene {
     this.controls = new OrbitControls(this.camera)
     this.controls.enableDamping = CONTROLS.enableDamping
     this.controls.minDistance = CONTROLS.minDistance
-    this.controls.connect(canvas)
+    if (earthControls === 'orbit') this.controls.connect(canvas)
+    else this.controls.enabled = false
 
     this.scene.add(this.ocean)
+    this.terrain = new Terrain({ heightScale: state.terrain.heightScale, brightness: state.terrain.brightness })
+    this.scene.add(this.terrain.group)
+
+    this.globeControls = new EarthGlobeControls(this.camera, earthControls === 'globe' ? canvas : null, this.terrain)
+    this.globeControls.enabled = earthControls === 'globe'
+    // Grabbing the view stops a north-up turn in progress.
+    this.globeControls.addEventListener('start', () => (this.turn = null))
+    this.controls.addEventListener('start', () => (this.turn = null))
+    if (test) this.globeControls.enableDamping = false // No inertia: inputs land in the frame they're given.
+    this.scene.add(this.moon)
+
+    this.moonControls = new MoonControls(MOON_RADIUS, () => this.camera.fov * DEG)
+    if (test) this.moonControls.smoothing = Infinity
+    this.moonControls.connect(canvas)
+    canvas.addEventListener('dblclick', this.onDoubleClick)
 
     this.composer = new EffectComposer(this.renderer, { frameBufferType: HalfFloatType, multisampling: 0 })
     this.composer.addPass(new RenderPass(this.scene, this.camera))
+    this.normalPass = new SceneNormalPass(this.scene, this.camera, (object) => {
+      if (object === this.ocean) return this.ocean.normalMaterial
+      if (this.terrain.isTerrainMesh(object)) return this.terrain.normalMaterial(object)
+      return null
+    })
+    this.composer.addPass(this.normalPass)
 
-    this.generator = new PrecomputedTexturesGenerator(this.renderer)
-    this.aerialPerspective = applySpaceViewFix(
-      new AerialPerspectiveEffect(this.camera, {
-        ...aerialPerspectiveEffectOptionsDefaults,
-        ...this.generator.textures,
-        sky: true,
-        sunLight: true,
-        skyLight: true,
-        correctAltitude: state.atmosphere.correctAltitude,
-      }),
+    this.generator = applyScatteringLutFix(new PrecomputedTexturesGenerator(this.renderer))
+    this.aerialPerspective = applyCloudShadowFade(
+      applySpaceViewFix(
+        new AerialPerspectiveEffect(this.camera, {
+          ...aerialPerspectiveEffectOptionsDefaults,
+          ...this.generator.textures,
+          sky: true,
+          sunLight: true,
+          skyLight: true,
+          correctAltitude: state.atmosphere.correctAltitude,
+        }),
+      ),
     )
 
     this.sun = new SunEffect(this.camera, {
@@ -146,13 +264,18 @@ export class EarthScene {
     })
     this.sun.transmittanceTexture = this.generator.textures.transmittanceTexture
 
+    this.moonEffect = new MoonEffect(this.camera, this.moon, { correctAltitude: state.atmosphere.correctAltitude })
+    this.moonEffect.transmittanceTexture = this.generator.textures.transmittanceTexture
+
     this.exposure = new Spring(state.toneMapping.exposure)
     this.dayOfYear = new Spring(state.date.dayOfYear)
     this.timeOfDay = new Spring(state.date.timeOfDay)
     this.renderer.toneMappingExposure = state.toneMapping.exposure
 
     applyLocation(this.camera, this.controls.target, this.locationLike())
+    if (earthControls === 'globe') this.applyPose(this.locationNadirPose(GLOBE.initialAltitude))
     this.applyState(state, true)
+    this.updateEphemeris()
 
     this.ready = Promise.all([
       this.generator.update(),
@@ -160,6 +283,11 @@ export class EarthScene {
         this.assets = assets
         if (this.clouds) this.assignCloudAssets(this.clouds)
         this.aerialPerspective.stbnTexture = assets.stbnTexture
+      }),
+      loadMoonAssets().then((assets: MoonAssets) => {
+        if (this.disposed) return
+        this.moonEffect.setMaps(assets.colorTexture, assets.slopeEastTexture, assets.slopeNorthTexture)
+        this.moonAssets = assets
       }),
     ]).then(() => undefined)
   }
@@ -180,7 +308,15 @@ export class EarthScene {
     const l0 = prev.location
     const l1 = next.location
     if (l0.longitude !== l1.longitude || l0.latitude !== l1.latitude || l0.altitude !== l1.altitude) {
-      applyLocation(this.camera, this.controls.target, this.locationLike())
+      this.turn = null
+      if (this.focusBody === 'earth' && this.flight == null) {
+        const altitude = this.altitude('earth')
+        applyLocation(this.camera, this.controls.target, this.locationLike())
+        // Globe: look straight down at the new location from the same height.
+        if (this.earthControls === 'globe') this.applyPose(this.locationNadirPose(altitude))
+      } else {
+        this.earthPose = null // Return to the new location instead.
+      }
     }
     this.applyState(next, false)
   }
@@ -197,14 +333,26 @@ export class EarthScene {
       else spring.set(value)
     }
     this.toneMapping.mode = TONE_MAPPING[toneMapping.mode]
+    // Without terrain the ocean's normal is the radial one takram falls back
+    // to, so the normal pass is skipped and the render is exactly the story's.
+    this.terrain.enabled = state.terrain.enabled
+    this.terrain.heightScale = state.terrain.heightScale
+    this.terrain.brightness = state.terrain.brightness
+    this.normalPass.enabled = state.terrain.enabled
+    this.aerialPerspective.normalBuffer = state.terrain.enabled ? this.normalPass.texture : null
     this.aerialPerspective.correctAltitude = state.atmosphere.correctAltitude
     this.sun.correctAltitude = state.atmosphere.correctAltitude
+    this.moonEffect.correctAltitude = state.atmosphere.correctAltitude
     this.sun.glare = state.sun.glare
     this.sun.corona = state.sun.corona
     // The realistic sun replaces takram's sky disk.
     this.aerialPerspective.sun = state.sun.model === 'takram'
-    const sunModelChanged = this.appliedSunModel !== state.sun.model
+    // The true-scale Moon replaces takram's fixed-size sky disk.
+    this.aerialPerspective.moon = state.moon.model === 'takram'
+    this.sun.moonRadius = state.moon.model === 'realistic' ? MOON_RADIUS : 0
+    const sunModelChanged = this.appliedSunModel !== state.sun.model || this.appliedMoonModel !== state.moon.model
     this.appliedSunModel = state.sun.model
+    this.appliedMoonModel = state.moon.model
 
     // Toggling clouds remounts the effect in the story (new instance, fresh history).
     if (cloud.enabled && this.clouds == null) {
@@ -273,16 +421,22 @@ export class EarthScene {
       ;(pass as unknown as { setEffects(effects: Effect[]): void }).setEffects([])
       pass.dispose()
     }
-    const effects: Effect[] = [
-      ...(this.clouds ? [this.clouds] : []),
-      this.aerialPerspective,
+    const atmosphere: Effect[] = [...(this.clouds ? [this.clouds] : []), this.aerialPerspective]
+    const rest: Effect[] = [
+      ...(this.state.moon.model === 'realistic' ? [this.moonEffect] : []),
       ...(this.state.sun.model === 'realistic' ? [this.sun] : []),
       this.lensFlare,
       this.toneMapping,
       this.smaa,
       this.dithering,
     ]
-    this.effectPasses = groupEffects(effects).map((group) => new EffectPass(this.camera, ...group))
+    // The atmosphere's LUTs leave too few texture units for the Moon's maps in
+    // one shader, so the Moon starts a new pass (the composite is the same).
+    const groups =
+      this.state.moon.model === 'realistic'
+        ? [...groupEffects(atmosphere), ...groupEffects(rest)]
+        : groupEffects([...atmosphere, ...rest])
+    this.effectPasses = groups.map((group) => new EffectPass(this.camera, ...group))
     for (const pass of this.effectPasses) this.composer.addPass(pass)
   }
 
@@ -333,17 +487,15 @@ export class EarthScene {
   /** One frame in the story's useFrame order: controls, atmosphere/date, exposure, composer. */
   render(delta: number): void {
     if (this.disposed) return
-    this.controls.update()
-    this.updateClipPlanes()
-
     const exposure = this.exposure.step(delta)
     this.dayOfYear.step(delta)
     this.timeOfDay.step(delta)
-
-    const date = this.currentDate()
-    getECIToECEFRotationMatrix(date, this.inertialToECEF)
-    getSunDirectionECI(date, this.sunDirection).applyMatrix4(this.inertialToECEF)
-    getMoonDirectionECI(date, this.moonDirection).applyMatrix4(this.inertialToECEF)
+    this.updateEphemeris()
+    this.updateCamera(delta)
+    this.keepAboveGround()
+    this.updateClipPlanes()
+    this.terrain.update(this.camera, this.renderer)
+    this.ocean.visible = !this.terrain.covering
 
     const ap = this.aerialPerspective
     ap.sunDirection.copy(this.sunDirection)
@@ -355,6 +507,9 @@ export class EarthScene {
     }
     this.sun.sunDirection.copy(this.sunDirection)
     this.sun.overlayMap = this.clouds?.atmosphereOverlay?.map ?? null
+    this.sun.moonPosition.copy(this.moon.position)
+    this.moonEffect.sunDirection.copy(this.sunDirection)
+    this.moonEffect.overlayMap = this.sun.overlayMap
     this.renderer.toneMappingExposure = exposure
 
     this.ocean.update(this.camera)
@@ -362,10 +517,287 @@ export class EarthScene {
     this.frame++
   }
 
+  private readonly groundUp = new Vector3()
+
+  /** Earth focus: never let the camera sink into the terrain. */
+  private keepAboveGround(): void {
+    if (!this.terrain.enabled || this.focusBody !== 'earth' || this.flight) return
+    let height: number
+    try {
+      height = this.geodetic.setFromECEF(this.camera.position).height
+    } catch {
+      return
+    }
+    const ground = this.terrain.elevationAt(this.geodetic.latitude, this.geodetic.longitude)
+    if (ground == null) return
+    Ellipsoid.WGS84.getSurfaceNormal(this.camera.position, this.groundUp)
+    if (liftAboveGround(this.camera.position, this.groundUp, height, ground, TERRAIN.minClearance)) {
+      this.camera.updateMatrixWorld()
+    }
+  }
+
+  /** Sun (takram's) and Moon (true position, same frame; see moonModel.ts) for the current date, ECEF. */
+  private updateEphemeris(): void {
+    const date = this.currentDate()
+    getECIToECEFRotationMatrix(date, this.inertialToECEF)
+    getSunDirectionECI(date, this.sunDirection).applyMatrix4(this.inertialToECEF)
+    getMoonDirectionECI(date, this.moonDirection).applyMatrix4(this.inertialToECEF) // takram's sky disk
+    this.moon.update(date, this.inertialToECEF)
+  }
+
+  // --- navigation --------------------------------------------------------------
+
+  /** The body the camera orbits ('earth': OrbitControls around the location; 'moon': MoonControls). */
+  get focus(): Focus {
+    return this.focusBody
+  }
+
+  get flying(): boolean {
+    return this.flight != null
+  }
+
+  /** Meters above the surface of the focused body. */
+  altitude(body: Focus = this.focusBody): number {
+    if (body === 'moon') return this.moon.altitudeOf(this.camera.position)
+    try {
+      return this.geodetic.setFromECEF(this.camera.position).height
+    } catch {
+      return this.camera.position.length() - WGS84_A
+    }
+  }
+
+  private cameraPose(result = createPose()): Pose {
+    result.position.copy(this.camera.position)
+    result.quaternion.copy(this.camera.quaternion)
+    result.up.copy(this.camera.up)
+    return result
+  }
+
+  private applyPose(pose: Pose): void {
+    this.camera.position.copy(pose.position)
+    this.camera.quaternion.copy(pose.quaternion)
+    this.camera.up.copy(pose.up)
+    this.camera.updateMatrixWorld()
+  }
+
+  /** Straight down at the panel's location from `altitude` meters, north up. */
+  private locationNadirPose(altitude: number): Pose {
+    const { longitude, latitude } = this.state.location
+    return earthNadirPose(longitude * DEG, latitude * DEG, altitude)
+  }
+
+  /** The default view of the panel's location (what the app starts with). */
+  private defaultEarthPose(): Pose & { target: Vector3 } {
+    if (this.earthControls === 'globe') {
+      const target = new Vector3()
+      applyLocation(new PerspectiveCamera(), target, this.locationLike())
+      return { ...this.locationNadirPose(GLOBE.initialAltitude), target }
+    }
+    const camera = new PerspectiveCamera()
+    camera.position.set(...CAMERA.initialPosition)
+    const target = new Vector3()
+    applyLocation(camera, target, this.locationLike())
+    const offset = camera.position.clone().sub(target)
+    if (offset.length() < CONTROLS.minDistance) offset.setLength(CONTROLS.minDistance)
+    camera.position.copy(target).add(offset)
+    camera.lookAt(target)
+    return { position: camera.position.clone(), quaternion: camera.quaternion.clone(), up: camera.up.clone(), target }
+  }
+
+  /** Default Moon view: above the point halfway between the sub-solar and sub-Earth points. */
+  defaultMoonView(altitude = 2 * MOON_RADIUS): MoonView {
+    const toSun = this.sunDirection.clone().applyMatrix3(this.moon.ecefToFixed)
+    const toEarth = this.moon.position.clone().negate().normalize().applyMatrix3(this.moon.ecefToFixed)
+    const d = toSun.add(toEarth)
+    if (d.lengthSq() < 1e-6) d.copy(toEarth)
+    d.normalize()
+    return { longitude: Math.atan2(d.y, d.x), latitude: Math.asin(d.z), altitude, heading: 0, tilt: 0 }
+  }
+
+  /** Fly the camera to a body; it then orbits that body. */
+  flyTo(body: Focus, options: FlyToOptions = {}): void {
+    this.turn = null
+    const leavingEarth = this.focusBody === 'earth' && this.flight == null
+    if (leavingEarth && body === 'moon') this.earthPose = { ...this.cameraPose(), target: this.controls.target.clone() }
+    this.controls.enabled = false
+    this.globeControls.enabled = false
+    this.moonControls.enabled = false
+
+    let end: () => Pose
+    let arrive: () => void
+    if (body === 'moon') {
+      const base = this.defaultMoonView(options.altitude)
+      const view: MoonView = {
+        longitude: options.longitude != null ? options.longitude * DEG : base.longitude,
+        latitude: options.latitude != null ? options.latitude * DEG : base.latitude,
+        altitude: base.altitude,
+        heading: (options.heading ?? 0) * DEG,
+        tilt: (options.tilt ?? 0) * DEG,
+      }
+      const fixed = moonViewPoseFixed(view, MOON_RADIUS)
+      end = () => moonPoseToECEF(fixed, this.moon)
+      arrive = () => {
+        this.moonControls.set(view)
+        this.moonControls.enabled = true
+      }
+    } else {
+      const pose = this.earthPose ?? this.defaultEarthPose()
+      end = () => pose
+      arrive = () => {
+        this.controls.target.copy(pose.target)
+        this.applyPose(pose)
+        if (this.earthControls === 'globe') {
+          this.globeControls.resetState()
+          this.globeControls.enabled = true
+        } else {
+          this.controls.enabled = true
+          this.controls.update()
+        }
+      }
+    }
+
+    const start = this.cameraPose()
+    const fromMoon = this.moon.altitudeOf(start.position) < this.altitude('earth')
+    const ends = (): FlightEnds => ({
+      start,
+      originCenter: fromMoon ? this.moon.position.clone() : new Vector3(),
+      originRadius: fromMoon ? MOON_RADIUS : WGS84_A,
+      targetCenter: body === 'moon' ? this.moon.position.clone() : new Vector3(),
+      end: end(),
+    })
+    const finish = () => {
+      this.flight = null
+      this.focusBody = body
+      this.applyPose(end())
+      arrive()
+    }
+    if (options.instant || this.test && options.duration == null) {
+      finish()
+      return
+    }
+    this.flight = { to: body, t: 0, duration: options.duration ?? 7, ends, arrive: finish }
+  }
+
+  private updateCamera(delta: number): void {
+    const flight = this.flight
+    if (flight) {
+      flight.t = Math.min(1, flight.t + delta / flight.duration)
+      if (flight.t >= 1) flight.arrive()
+      else this.applyPose(flightPose(flight.ends(), flight.t))
+      return
+    }
+    if (this.focusBody === 'earth') {
+      if (this.turn) this.stepTurn(delta)
+      else if (this.earthControls === 'globe') this.globeControls.update(delta)
+      else this.controls.update()
+    } else {
+      const view = this.moonControls.update(delta)
+      this.applyPose(moonPoseToECEF(moonViewPoseFixed(view, MOON_RADIUS), this.moon))
+    }
+  }
+
+  /**
+   * The point the Earth view turns around: the target (orbit controls), else
+   * the ground at the screen center, else the camera itself.
+   */
+  private viewPivot(result = new Vector3()): Vector3 {
+    if (this.earthControls === 'orbit') return result.copy(this.controls.target)
+    const forward = new Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion)
+    return Ellipsoid.WGS84.getIntersection(new Ray(this.camera.position.clone(), forward), result) ?? result.copy(this.camera.position)
+  }
+
+  /** Heading of the view (radians clockwise from north; the Moon's north when orbiting it). */
+  heading(): number {
+    if (this.flight) return 0
+    if (this.focusBody === 'moon') return this.moonControls.view.heading
+    return viewHeading(this.camera.quaternion, geodeticUp(this.viewPivot()))
+  }
+
+  /**
+   * Turn the view so north is up, keeping the point at the screen center, the
+   * distance and the tilt (Google Earth's compass). Animated over `duration`
+   * seconds; grabbing the view stops it.
+   */
+  resetNorth(duration = 0.8): void {
+    if (this.flight) return
+    if (this.focusBody === 'moon') {
+      this.moonControls.goal.heading = 0 // MoonControls eases there the short way.
+      return
+    }
+    const pivot = this.viewPivot()
+    const up = geodeticUp(pivot)
+    const angle = viewHeading(this.camera.quaternion, up)
+    if (Math.abs(angle) < 1e-6) return
+    this.globeControls.stopInertia()
+    this.turn = { start: this.cameraPose(), pivot, up, angle, t: 0, duration }
+  }
+
+  private stepTurn(delta: number): void {
+    const turn = this.turn!
+    turn.t = Math.min(1, turn.t + (turn.duration > 0 ? delta / turn.duration : 1))
+    const eased = turn.t * turn.t * (3 - 2 * turn.t)
+    this.applyPose(rotatePoseAbout(turn.start, turn.pivot, turn.up, turn.angle * eased))
+    if (turn.t >= 1) {
+      this.turn = null
+      if (this.earthControls === 'orbit') this.controls.update()
+    }
+  }
+
+  /**
+   * Turn the camera to look along an ECEF direction without moving it (Earth
+   * focus: the orbit target moves in front of the camera).
+   */
+  aim(direction: Vector3): void {
+    if (this.focusBody !== 'earth' || this.flight) return
+    const d = direction.clone().normalize()
+    this.controls.target.copy(this.camera.position).addScaledVector(d, CONTROLS.minDistance)
+    if (this.earthControls === 'globe') {
+      const up = Ellipsoid.WGS84.getSurfaceNormal(this.camera.position, new Vector3())
+      lookQuaternion(d, up, this.camera.quaternion)
+      this.camera.up.copy(up)
+      this.camera.updateMatrixWorld()
+    } else {
+      this.controls.update()
+    }
+  }
+
+  /** Current Moon view (when orbiting the Moon), e.g. to hand a flight over. */
+  moonView(): MoonView {
+    return moonViewFromECEF(this.camera.position, this.camera.quaternion, this.moon, MOON_RADIUS)
+  }
+
+  /** Double-click a body to fly to it. */
+  private pick(event: MouseEvent): void {
+    if (this.flight) return
+    const rect = this.canvas.getBoundingClientRect()
+    const ndc = new Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
+    const body = this.bodyAt(ndc)
+    if (body != null && body !== this.focusBody) this.flyTo(body)
+  }
+
+  /** The nearest body under a point in normalized device coordinates. */
+  bodyAt(ndc: Vector2): Focus | null {
+    this.camera.updateMatrixWorld()
+    const direction = new Vector3(ndc.x, ndc.y, 0.5).unproject(this.camera).sub(this.camera.position).normalize()
+    const ray = new Ray(this.camera.position.clone(), direction)
+    const hit = new Vector3()
+    const moon = ray.intersectSphere(new Sphere(this.moon.position, MOON_RADIUS), hit) ? hit.distanceTo(ray.origin) : Infinity
+    const earth = ray.intersectSphere(new Sphere(new Vector3(), WGS84_A), hit) ? hit.distanceTo(ray.origin) : Infinity
+    if (moon === Infinity && earth === Infinity) return null
+    return moon < earth ? 'moon' : 'earth'
+  }
+
   dispose(): void {
     this.disposed = true
+    this.canvas.removeEventListener('dblclick', this.onDoubleClick)
+    this.moonControls.dispose()
+    this.moonEffect.dispose()
+    if (this.moonAssets) for (const t of Object.values(this.moonAssets)) t.dispose()
     this.controls.dispose()
+    this.globeControls.dispose()
     this.clouds?.dispose()
+    this.terrain.dispose()
+    this.normalPass.dispose()
     this.sun.dispose()
     this.composer.dispose()
     this.generator.dispose()

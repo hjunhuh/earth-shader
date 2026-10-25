@@ -5,9 +5,12 @@ import {
   CORONA_LIMITS,
   GLARE_LIMITS,
   LOCATION_LIMITS,
+  MOON_MODELS,
   QUALITIES,
   SUN_MODELS,
+  TERRAIN_LIMITS,
   TONE_MAPPING_MODES,
+  type MoonModel,
   type Quality,
   type SunModel,
   type ToneMappingName,
@@ -22,8 +25,10 @@ export interface AppState {
   date: { dayOfYear: number; timeOfDay: number }
   cloud: { enabled: boolean; quality: Quality; coverage: number; animate: boolean }
   sun: { model: SunModel; glare: number; corona: number }
+  moon: { model: MoonModel }
   toneMapping: { mode: ToneMappingName; exposure: number }
   atmosphere: { correctAltitude: boolean }
+  terrain: { enabled: boolean; heightScale: number; brightness: number }
 }
 
 export type StatePatch = { [K in keyof AppState]?: Partial<AppState[K]> }
@@ -37,8 +42,10 @@ export function createDefaultState(): AppState {
     date: { ...DEFAULTS.date },
     cloud: { ...DEFAULTS.cloud },
     sun: { ...DEFAULTS.sun },
+    moon: { ...DEFAULTS.moon },
     toneMapping: { ...DEFAULTS.toneMapping },
     atmosphere: { ...DEFAULTS.atmosphere },
+    terrain: { ...DEFAULTS.terrain },
   }
 }
 
@@ -48,8 +55,10 @@ export function applyPatch(state: AppState, patch: StatePatch): AppState {
   const date = { ...state.date, ...patch.date }
   const cloud = { ...state.cloud, ...patch.cloud }
   const sun = { ...state.sun, ...patch.sun }
+  const moon = { ...state.moon, ...patch.moon }
   const tone = { ...state.toneMapping, ...patch.toneMapping }
   const atmosphere = { ...state.atmosphere, ...patch.atmosphere }
+  const terrain = { ...state.terrain, ...patch.terrain }
   return {
     location: {
       longitude: clamp(finite(loc.longitude, state.location.longitude), LOCATION_LIMITS.longitude.min, LOCATION_LIMITS.longitude.max),
@@ -71,10 +80,18 @@ export function applyPatch(state: AppState, patch: StatePatch): AppState {
       glare: clamp(finite(sun.glare, state.sun.glare), GLARE_LIMITS.min, GLARE_LIMITS.max),
       corona: clamp(finite(sun.corona, state.sun.corona), CORONA_LIMITS.min, CORONA_LIMITS.max),
     },
+    moon: {
+      model: (MOON_MODELS as readonly string[]).includes(moon.model) ? moon.model : state.moon.model,
+    },
     toneMapping: {
       mode: (TONE_MAPPING_MODES as readonly string[]).includes(tone.mode) ? tone.mode : state.toneMapping.mode,
       exposure: clamp(finite(tone.exposure, state.toneMapping.exposure), EXPOSURE_LIMITS.min, EXPOSURE_LIMITS.max),
     },
     atmosphere: { correctAltitude: Boolean(atmosphere.correctAltitude) },
+    terrain: {
+      enabled: Boolean(terrain.enabled),
+      heightScale: clamp(finite(terrain.heightScale, state.terrain.heightScale), TERRAIN_LIMITS.heightScale.min, TERRAIN_LIMITS.heightScale.max),
+      brightness: clamp(finite(terrain.brightness, state.terrain.brightness), TERRAIN_LIMITS.brightness.min, TERRAIN_LIMITS.brightness.max),
+    },
   }
 }

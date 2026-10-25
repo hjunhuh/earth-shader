@@ -53,7 +53,13 @@ void main() {
   float ndcZ = clip.z / clip.w;
   if (ndcZ > 1.0) discard; // Beyond the far plane, like a clipped mesh.
   gl_FragDepth = ndcZ * 0.5 + 0.5;
+  #ifdef NORMAL_OUTPUT
+  // The radial normal takram uses when it has no normal buffer, in view space.
+  vec3 hit = cameraPosition + worldDirection * t;
+  outputColor = vec4(0.5 * normalize(mat3(viewMatrix) * normalize(hit)) + 0.5, 1.0);
+  #else
   outputColor = vec4(albedo, 1.0);
+  #endif
 }
 `
 
@@ -74,6 +80,8 @@ export interface OceanUniforms {
  */
 export class Ocean extends Mesh<BufferGeometry, ShaderMaterial> {
   declare material: ShaderMaterial & { uniforms: OceanUniforms }
+  /** Same surface, writing its view-space normal (0.5·n + 0.5) for the normal pass. */
+  readonly normalMaterial: ShaderMaterial
 
   constructor(albedo: readonly [number, number, number] = OCEAN_ALBEDO) {
     const geometry = new BufferGeometry()
@@ -96,6 +104,10 @@ export class Ocean extends Mesh<BufferGeometry, ShaderMaterial> {
       toneMapped: false,
     })
     super(geometry, material)
+    this.normalMaterial = material.clone()
+    this.normalMaterial.name = 'OceanNormal'
+    this.normalMaterial.uniforms = uniforms // Shared, so update() drives both.
+    this.normalMaterial.defines = { NORMAL_OUTPUT: '' }
     this.name = 'Ocean'
     this.frustumCulled = false
     this.renderOrder = -1
