@@ -8,6 +8,7 @@ import {
   MOON_MODELS,
   QUALITIES,
   SUN_MODELS,
+  TERRAIN_LIMITS,
   TONE_MAPPING_MODES,
   type MoonModel,
   type Quality,
@@ -27,6 +28,7 @@ export interface AppState {
   moon: { model: MoonModel }
   toneMapping: { mode: ToneMappingName; exposure: number }
   atmosphere: { correctAltitude: boolean }
+  terrain: { enabled: boolean; heightScale: number; brightness: number }
 }
 
 export type StatePatch = { [K in keyof AppState]?: Partial<AppState[K]> }
@@ -43,6 +45,7 @@ export function createDefaultState(): AppState {
     moon: { ...DEFAULTS.moon },
     toneMapping: { ...DEFAULTS.toneMapping },
     atmosphere: { ...DEFAULTS.atmosphere },
+    terrain: { ...DEFAULTS.terrain },
   }
 }
 
@@ -55,6 +58,7 @@ export function applyPatch(state: AppState, patch: StatePatch): AppState {
   const moon = { ...state.moon, ...patch.moon }
   const tone = { ...state.toneMapping, ...patch.toneMapping }
   const atmosphere = { ...state.atmosphere, ...patch.atmosphere }
+  const terrain = { ...state.terrain, ...patch.terrain }
   return {
     location: {
       longitude: clamp(finite(loc.longitude, state.location.longitude), LOCATION_LIMITS.longitude.min, LOCATION_LIMITS.longitude.max),
@@ -84,5 +88,10 @@ export function applyPatch(state: AppState, patch: StatePatch): AppState {
       exposure: clamp(finite(tone.exposure, state.toneMapping.exposure), EXPOSURE_LIMITS.min, EXPOSURE_LIMITS.max),
     },
     atmosphere: { correctAltitude: Boolean(atmosphere.correctAltitude) },
+    terrain: {
+      enabled: Boolean(terrain.enabled),
+      heightScale: clamp(finite(terrain.heightScale, state.terrain.heightScale), TERRAIN_LIMITS.heightScale.min, TERRAIN_LIMITS.heightScale.max),
+      brightness: clamp(finite(terrain.brightness, state.terrain.brightness), TERRAIN_LIMITS.brightness.min, TERRAIN_LIMITS.brightness.max),
+    },
   }
 }

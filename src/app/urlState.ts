@@ -62,7 +62,7 @@ function prune<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T
 }
 
-/** `?lon=&lat=&alt=&doy=&tod=&clouds=&quality=&coverage=&sun=&glare=&moon=&exposure=` plus the start view and test flags. */
+/** `?lon=&lat=&alt=&doy=&tod=&clouds=&quality=&coverage=&sun=&glare=&moon=&exposure=&terrain=&exaggeration=&mapBrightness=` plus the start view and test flags. */
 export function parseUrl(search: string): ParsedUrl {
   const params = new URLSearchParams(search)
   const errors: string[] = []
@@ -101,6 +101,11 @@ export function parseUrl(search: string): ParsedUrl {
       mode: tone !== null && (TONE_MAPPING_MODES as readonly string[]).includes(tone) ? (tone as ToneMappingName) : undefined,
     }),
     atmosphere: prune({ correctAltitude: flag(params, 'correctAltitude', errors) }),
+    terrain: prune({
+      enabled: flag(params, 'terrain', errors),
+      heightScale: number(params, 'exaggeration', errors),
+      brightness: number(params, 'mapBrightness', errors),
+    }),
   }
   const state = applyPatch(createDefaultState(), patch)
 

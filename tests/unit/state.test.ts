@@ -12,6 +12,7 @@ describe('state', () => {
       moon: { model: 'realistic' },
       toneMapping: { mode: 'AgX', exposure: 10 },
       atmosphere: { correctAltitude: true },
+      terrain: { enabled: true, heightScale: 1, brightness: 0.25 },
     })
   })
 
@@ -21,12 +22,14 @@ describe('state', () => {
       date: { timeOfDay: 30, dayOfYear: 0 },
       cloud: { quality: 'max' as never, coverage: 2 },
       toneMapping: { exposure: Number.NaN },
+      terrain: { heightScale: 99, brightness: -1 },
     })
     expect(s.location).toEqual({ longitude: 180, latitude: -90, altitude: 30000 })
     expect(s.date).toEqual({ dayOfYear: 1, timeOfDay: 24 })
     expect(s.cloud.quality).toBe('high')
     expect(s.cloud.coverage).toBe(1)
     expect(s.toneMapping.exposure).toBe(10)
+    expect(s.terrain).toEqual({ enabled: true, heightScale: 10, brightness: 0.05 })
   })
 
   it('patches are pure', () => {
@@ -46,6 +49,12 @@ describe('URL', () => {
     expect(state.date).toEqual({ dayOfYear: 170, timeOfDay: 17.5 })
     expect(state.cloud).toMatchObject({ enabled: false, quality: 'ultra', coverage: 0.5 })
     expect(state.toneMapping.exposure).toBe(15)
+  })
+
+  it('parses terrain', () => {
+    const { state, errors } = parseUrl('?terrain=0&exaggeration=2.5&mapBrightness=0.4')
+    expect(errors).toEqual([])
+    expect(state.terrain).toEqual({ enabled: false, heightScale: 2.5, brightness: 0.4 })
   })
 
   it('reports bad values and keeps defaults', () => {
