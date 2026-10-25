@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { Geodetic, radians } from '@takram/three-geospatial'
 import { APP, camera, open, renderFrames } from './helpers'
+import { routeTiles } from './tiles'
 
 // lil-gui 0.21: folder = div.lil-gui > button.lil-title + div.lil-children > div.lil-controller > div.lil-name
 const controller = (page: Page, folder: string, name: string) =>
@@ -80,7 +81,8 @@ test.describe('normal mode (no test hooks)', () => {
       if (m.type() === 'error') errors.push(m.text())
     })
     await page.setViewportSize({ width: 960, height: 540 })
-    await page.goto('/')
+    // The story view (orbit controls near the ground, no terrain), where the sky and the sun are in frame.
+    await page.goto('/?nav=orbit&terrain=0')
     await expect(controller(page, 'date', 'timeOfDay')).toHaveCount(1)
     expect(await page.evaluate(() => window.__earth)).toBeUndefined()
     // Wait for the LUTs and textures, then check a lit frame via a screenshot.
@@ -102,6 +104,39 @@ test.describe('normal mode (no test hooks)', () => {
     }, shot.toString('base64'))
     expect(stats.mean).toBeGreaterThan(60) // lit sky and ocean
     expect(stats.saturated).toBeGreaterThanOrEqual(3) // the sun disk: 0.53° ≈ 4 px across at 540 px / 75°
+    expect(errors).toEqual([])
+  })
+
+  test('boots into the globe view: the Earth in the middle of the frame, space around it', async ({ page }) => {
+    const errors: string[] = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    page.on('console', (m) => {
+      if (m.type() === 'error') errors.push(m.text())
+    })
+    const requests = await routeTiles(page)
+    await page.setViewportSize({ width: 960, height: 540 })
+    await page.goto('/')
+    await expect(controller(page, 'terrain', 'enabled')).toHaveCount(1)
+    await expect(page.locator('#attribution')).toBeVisible()
+    await page.waitForTimeout(6000)
+    const shot = await page.locator('canvas').screenshot()
+    const regions = await page.evaluate(async (b64) => {
+      const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/png' }))
+      const c = new OffscreenCanvas(bmp.width, bmp.height)
+      const ctx = c.getContext('2d')!
+      ctx.drawImage(bmp, 0, 0)
+      const mean = (x: number, y: number, w: number, h: number) => {
+        const d = ctx.getImageData(x, y, w, h).data
+        let sum = 0
+        for (let i = 0; i < d.length; i += 4) sum += d[i]! + d[i + 1]! + d[i + 2]!
+        return sum / (d.length / 4) / 3
+      }
+      const s = bmp.width / 960 // device pixels
+      return { center: mean(440 * s, 230 * s, 80 * s, 80 * s), corner: mean(0, 0, 80 * s, 80 * s) }
+    }, shot.toString('base64'))
+    expect(regions.center, 'the lit globe under the camera').toBeGreaterThan(30)
+    expect(regions.corner, 'space').toBeLessThan(10)
+    expect(requests.imagery + requests.elevation).toBeGreaterThan(0)
     expect(errors).toEqual([])
   })
 })
