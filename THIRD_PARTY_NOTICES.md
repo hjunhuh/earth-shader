@@ -27,6 +27,16 @@ under the Creative Commons Attribution 4.0 International License
 screen while the terrain is on. Later EOX mosaics (2018 onward) are CC BY-NC-SA
 and are not used.
 
+## NASA Blue Marble Next Generation (whole-Earth view)
+
+`public/earth/bluemarble.jpg` is NASA Earth Observatory's Blue Marble Next
+Generation, July 2004, true color (Reto Stöckli, NASA Earth Observatory;
+https://visibleearth.nasa.gov/images/74092), resampled to 8192×4096 by
+`scripts/prepare-earth-textures.mjs`. NASA imagery is not subject to copyright
+in the United States (NASA Media Usage Guidelines); credit: NASA Earth
+Observatory. `public/earth/opensea.png` is derived by the same script from the
+Terrain Tiles below (ETOPO1 bathymetry).
+
 ## Terrain Tiles (elevation)
 
 Elevation is streamed from the Terrain Tiles on AWS (Mapzen/Tilezen "Joerd",
