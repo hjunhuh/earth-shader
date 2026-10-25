@@ -85,6 +85,29 @@ test.describe('globe controls', () => {
     expect(await pointAt(page, [635, 180])).toBeNull()
   })
 
+  test('a drag past the edge of the globe keeps turning it, past 180°', async ({ page }) => {
+    // The stock GlobeControls stopped once the cursor left the globe: from
+    // 10,000 km up, a drag turned it at most 90° − 23° ≈ 67°.
+    await open(page, APP, { nav: 'globe', lon: 30, lat: 0 }, { frames: 4, width: 1280, height: 360 })
+    const centerLon = async () => (await page.evaluate(() => window.__earth!.surfacePointAt!(640, 180)))![0]
+    let turned = 0
+    let previous = await centerLon()
+    await page.mouse.move(640, 180)
+    await page.mouse.down()
+    for (let i = 1; i <= 40; ++i) {
+      await page.mouse.move(640 + (630 * i) / 40, 180)
+      await renderFrames(page, 1)
+      const lon = await centerLon()
+      const step = ((lon - previous + 540) % 360) - 180 // unwrapped
+      expect(step, 'always the same way, never back').toBeLessThanOrEqual(0.01)
+      turned -= step
+      previous = lon
+    }
+    await page.mouse.up()
+    // Dragging east brings the west into view: the longitude at the center falls.
+    expect(turned).toBeGreaterThan(180)
+  })
+
   test('a left drag turns the globe so the grabbed point follows the cursor', async ({ page }) => {
     await openGlobe(page)
     const from: [number, number] = [300, 170]
