@@ -12,7 +12,7 @@ describe('state', () => {
       moon: { model: 'realistic' },
       toneMapping: { mode: 'AgX', exposure: 10 },
       atmosphere: { correctAltitude: true },
-      terrain: { enabled: true, heightScale: 1, brightness: 0.25 },
+      terrain: { enabled: true, heightScale: 1, brightness: 1 },
     })
   })
 

@@ -50,8 +50,8 @@ export const DEFAULTS = {
   moon: { model: 'realistic' as MoonModel },
   toneMapping: { mode: 'AgX' as ToneMappingName, exposure: 10 },
   atmosphere: { correctAltitude: true },
-  // OSM's paper-map colors are ~0.8 albedo; 0.25 brings land near Earth's 0.1–0.3.
-  terrain: { enabled: true, heightScale: 1, brightness: 0.25 },
+  // Satellite colors are close to surface albedo already.
+  terrain: { enabled: true, heightScale: 1, brightness: 1 },
 } as const
 
 /** Camera and controls exactly as the story: R3F Canvas + drei OrbitControls. */
@@ -75,17 +75,18 @@ export const CLOUD_SHADOW_MAX_FAR = 1e5
 export const OCEAN_ALBEDO = [0.006, 0.026, 0.07] as const
 
 /**
- * Map and elevation tiles (Web Mercator XYZ). Both send CORS headers.
- * - Imagery: OpenStreetMap's standard tiles. Their usage policy
- *   (https://operations.osmfoundation.org/policies/tiles/) requires visible
- *   attribution and forbids prefetching; swap the URL for heavy use.
+ * Imagery and elevation tiles (Web Mercator XYZ). Both are open data, need no
+ * key and send CORS headers.
+ * - Imagery: EOX Sentinel-2 cloudless 2016 (CC BY 4.0, https://cloudless.eox.at):
+ *   a cloud-free satellite mosaic without labels, 10 m pixels, so real detail
+ *   ends at z13. EOX applies a fair-use policy and asks for visible credit.
  * - Elevation: AWS Terrain Tiles, Terrarium encoding, z0–15, meters above
  *   mean sea level with ETOPO1 bathymetry (negative under the sea).
  */
 export const TERRAIN = {
-  imageryUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  /** Zoom levels the imagery server has (z0–19). */
-  imageryLevels: 20,
+  imageryUrl: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg',
+  /** z0–13: deeper levels exist but are only upsampled, so the terrain reuses z13. */
+  imageryLevels: 14,
   elevationUrl: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png',
   elevationMaxZoom: 15,
   /** Screen-space error in pixels; higher loads fewer tiles. */

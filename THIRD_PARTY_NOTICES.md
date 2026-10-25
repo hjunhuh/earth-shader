@@ -16,15 +16,16 @@ NASA imagery and data are not subject to copyright in the United States
 (NASA Media Usage Guidelines). Credit: NASA's Scientific Visualization
 Studio; LRO LROC and LOLA teams.
 
-## OpenStreetMap (map tiles)
+## Sentinel-2 cloudless 2016 (satellite imagery)
 
-The terrain is textured with the standard OpenStreetMap raster tiles
-(`https://tile.openstreetmap.org`), streamed at runtime and not redistributed
-here. Map data © OpenStreetMap contributors, available under the Open Database
-License (https://www.openstreetmap.org/copyright). The app shows this credit on
-screen while the terrain is on, as the OSM Foundation tile usage policy
-(https://operations.osmfoundation.org/policies/tiles/) requires, and only
-requests the tiles in view.
+The terrain is textured with EOX's Sentinel-2 cloudless mosaic of 2016
+(layer `s2cloudless_3857`, https://cloudless.eox.at), streamed at runtime and
+not redistributed here: "EOxCloudless https://cloudless.eox.at by EOX IT
+Services GmbH (Contains modified Copernicus Sentinel data 2016)", released
+under the Creative Commons Attribution 4.0 International License
+(https://creativecommons.org/licenses/by/4.0/). The app shows this credit on
+screen while the terrain is on. Later EOX mosaics (2018 onward) are CC BY-NC-SA
+and are not used.
 
 ## Terrain Tiles (elevation)
 
