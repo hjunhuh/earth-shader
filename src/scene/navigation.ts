@@ -1,4 +1,5 @@
 import { Matrix4, Quaternion, Vector3 } from 'three'
+import { Ellipsoid, Geodetic } from '@takram/three-geospatial'
 import type { Moon } from './Moon'
 
 /**
@@ -46,6 +47,24 @@ export function lookQuaternion(forward: Vector3, up: Vector3, result = new Quate
   x.normalize()
   const y = new Vector3().crossVectors(z, x)
   return result.setFromRotationMatrix(new Matrix4().makeBasis(x, y, z))
+}
+
+/**
+ * Earth camera looking straight down at a geodetic point (radians, meters
+ * above the ellipsoid), north at the top of the screen.
+ */
+export function earthNadirPose(longitude: number, latitude: number, altitude: number, result = createPose()): Pose {
+  // The local frame of the point on the surface: its normal is "down" from
+  // any height above it (the gradient at the camera itself is not, far up).
+  const surface = new Geodetic(longitude, latitude, 0).toECEF()
+  const east = new Vector3()
+  const north = new Vector3()
+  const up = new Vector3()
+  Ellipsoid.WGS84.getEastNorthUpVectors(surface, east, north, up)
+  result.position.copy(surface).addScaledVector(up, altitude)
+  lookQuaternion(up.clone().negate(), north, result.quaternion)
+  result.up.copy(up)
+  return result
 }
 
 // --- Moon orbit controls ------------------------------------------------------

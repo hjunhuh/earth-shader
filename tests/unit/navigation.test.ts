@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { Quaternion, Vector3 } from 'three'
+import { Quaternion, Ray, Vector3 } from 'three'
 import { getECIToECEFRotationMatrix } from '@takram/three-atmosphere'
+import { Ellipsoid, Geodetic, radians } from '@takram/three-geospatial'
 import { Moon } from '../../src/scene/Moon'
 import { MOON_RADIUS } from '../../src/scene/moonModel'
 import {
   aroundCenter,
   createPose,
+  earthNadirPose,
   flightPose,
   flightPosition,
   MOON_ALTITUDE_LIMITS,
@@ -103,6 +105,35 @@ describe('flights', () => {
       const d = flightPosition(ends, i / 1000).distanceTo(moon.position)
       expect(d).toBeLessThanOrEqual(toMoon + 1e-6)
       toMoon = d
+    }
+  })
+})
+
+describe('earthNadirPose', () => {
+  it('sits at the geodetic point and altitude, looking along the ellipsoid normal, north up', () => {
+    for (const [lon, lat] of [[30, 35], [127, 37.5], [-70, -50], [0, 89]] as const) {
+      const pose = earthNadirPose(radians(lon), radians(lat), 1e7)
+      const g = new Geodetic().setFromECEF(pose.position)
+      // Looking straight down lands on the point itself.
+      const below = Ellipsoid.WGS84.getIntersection(new Ray(pose.position, new Vector3(0, 0, -1).applyQuaternion(pose.quaternion)))!
+      const foot = new Geodetic().setFromECEF(below)
+      expect(foot.longitude).toBeCloseTo(radians(lon), 9)
+      expect(foot.latitude).toBeCloseTo(radians(lat), 9)
+      expect(g.longitude).toBeCloseTo(radians(lon), 9)
+      expect(g.latitude).toBeCloseTo(radians(lat), 9)
+      expect(g.height).toBeCloseTo(1e7, 0)
+      // The geodetic frame of the point below (not the gradient at the camera).
+      const [l, p] = [radians(lon), radians(lat)]
+      const up = new Vector3(Math.cos(p) * Math.cos(l), Math.cos(p) * Math.sin(l), Math.sin(p))
+      const east = new Vector3(-Math.sin(l), Math.cos(l), 0)
+      const north = new Vector3().crossVectors(up, east)
+      const forward = new Vector3(0, 0, -1).applyQuaternion(pose.quaternion)
+      const screenUp = new Vector3(0, 1, 0).applyQuaternion(pose.quaternion)
+      const screenRight = new Vector3(1, 0, 0).applyQuaternion(pose.quaternion)
+      expect(forward.dot(up)).toBeCloseTo(-1, 9)
+      expect(screenUp.dot(north)).toBeCloseTo(1, 9)
+      expect(screenRight.dot(east)).toBeCloseTo(1, 9)
+      expect(pose.up.dot(up)).toBeCloseTo(1, 9)
     }
   })
 })
