@@ -58,6 +58,7 @@ export class EarthApp {
       const { altitude, longitude, latitude, heading, tilt } = view
       scene.flyTo('moon', { instant: true, altitude, longitude, latitude, heading, tilt })
     }
+    this.showAttribution()
     this.resize()
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(canvas)
@@ -69,6 +70,13 @@ export class EarthApp {
 
   update(patch: StatePatch): void {
     this.scene.setState(applyPatch(this.scene.getState(), patch))
+    this.showAttribution()
+  }
+
+  /** The map and elevation credits, required by their licenses while the terrain shows. */
+  private showAttribution(): void {
+    const el = document.getElementById('attribution')
+    if (el) el.hidden = !this.state.terrain.enabled
   }
 
   /** Programmatic change that the panel should also show. */

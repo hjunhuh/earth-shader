@@ -16,6 +16,34 @@ NASA imagery and data are not subject to copyright in the United States
 (NASA Media Usage Guidelines). Credit: NASA's Scientific Visualization
 Studio; LRO LROC and LOLA teams.
 
+## OpenStreetMap (map tiles)
+
+The terrain is textured with the standard OpenStreetMap raster tiles
+(`https://tile.openstreetmap.org`), streamed at runtime and not redistributed
+here. Map data © OpenStreetMap contributors, available under the Open Database
+License (https://www.openstreetmap.org/copyright). The app shows this credit on
+screen while the terrain is on, as the OSM Foundation tile usage policy
+(https://operations.osmfoundation.org/policies/tiles/) requires, and only
+requests the tiles in view.
+
+## Terrain Tiles (elevation)
+
+Elevation is streamed from the Terrain Tiles on AWS (Mapzen/Tilezen "Joerd",
+Terrarium encoding, https://registry.opendata.aws/terrain-tiles/). Sources and
+their credits, listed at
+https://github.com/tilezen/joerd/blob/master/docs/attribution.md, include:
+3DEP, SRTM and GMTED2010 data courtesy of the U.S. Geological Survey; ETOPO1
+(NOAA); Copernicus EU-DEM; and regional data from LINZ, Kartverket, Geoscience
+Australia, INEGI, Natural Resources Canada (Open Government Licence – Canada),
+the UK Environment Agency and ArcticDEM.
+
+## 3d-tiles-renderer
+
+The terrain's tiling, level of detail and displacement come from
+`3d-tiles-renderer` (NASA-AMMOS/3DTilesRendererJS, Apache License 2.0) as an
+npm dependency. `src/scene/Terrain.ts` adapts the bump-mapping GLSL of its
+`TerrainLambertMaterial`.
+
 ## astronomy-engine
 
 Sun and Moon ephemerides use `astronomy-engine` (MIT, Copyright (c) 2019–2023
