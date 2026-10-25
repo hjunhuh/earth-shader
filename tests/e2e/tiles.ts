@@ -66,7 +66,8 @@ export interface Requests {
   maxElevationZoom: number
 }
 
-export async function routeTiles(page: Page): Promise<Requests> {
+/** `land`: the imagery color of land (8-bit RGB). */
+export async function routeTiles(page: Page, { land = LAND }: { land?: number[] } = {}): Promise<Requests> {
   const requests: Requests = { imagery: 0, elevation: 0, maxElevationZoom: 0 }
   const cache = new Map<string, Buffer>()
   const zxy = (url: string) => url.match(/\/(\d+)\/(\d+)\/(\d+)\.png/)!.slice(1).map(Number) as [number, number, number]
@@ -75,7 +76,7 @@ export async function routeTiles(page: Page): Promise<Requests> {
     requests.imagery++
     const [z, y, x] = zyx(route.request().url())
     const key = `i${z}/${x}/${y}`
-    if (!cache.has(key)) cache.set(key, png(256, 256, (px, py) => (pixelLonLat(z, x, y, px, py)[0] < COAST_LON ? WATER : LAND)))
+    if (!cache.has(key)) cache.set(key, png(256, 256, (px, py) => (pixelLonLat(z, x, y, px, py)[0] < COAST_LON ? WATER : land)))
     return route.fulfill({ contentType: 'image/png', body: cache.get(key)!, headers: { 'access-control-allow-origin': '*' } })
   })
   await page.route('https://s3.amazonaws.com/elevation-tiles-prod/**', (route) => {

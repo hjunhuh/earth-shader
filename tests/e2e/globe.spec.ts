@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import { Geodetic } from '@takram/three-geospatial'
 import { Quaternion, Vector3 } from 'three'
-import { APP, open, renderFrames } from './helpers'
+import { APP, diff, open, readPixels, renderFrames } from './helpers'
+import { routeTiles } from './tiles'
 
 /**
  * The default Earth controls (Google Earth style): the app starts looking
@@ -183,5 +184,32 @@ test.describe('globe controls', () => {
     await renderFrames(page, 2)
     expect(await page.evaluate(() => window.__earth!.heading!())).toBeCloseTo(0, 3)
     expect((await page.evaluate(() => window.__earth!.moonView!())).tilt).toBeCloseTo((30 * Math.PI) / 180, 3)
+  })
+
+  test('from afar the globe shows the Blue Marble, up close the imagery tiles', async ({ browser }) => {
+    // Tiles in two loud land colors: whatever differs between the frames came from the tiles.
+    const frame = async (land: number[], zoomIn: boolean) => {
+      const page = await browser.newPage()
+      try {
+        await routeTiles(page, { land })
+        await openGlobe(page, { terrain: 1, clouds: 0, tod: 12, doy: 170 })
+        if (zoomIn) await wheel(page, CENTER, -300, 30)
+        for (let i = 0; i < 100; ++i) {
+          await renderFrames(page, 4)
+          if ((await page.evaluate(() => window.__earth!.terrainProgress!())) >= 1 && i >= 8) break
+          await page.waitForTimeout(50)
+        }
+        await renderFrames(page, 30)
+        return await readPixels(page, 220, 100, 200, 160)
+      } finally {
+        await page.close()
+      }
+    }
+    const magenta = [0xff, 0x00, 0xff]
+    const green = [0x00, 0xc0, 0x00]
+    const far = diff(await frame(magenta, false), await frame(green, false), 2)
+    expect(far.mean, 'the globe ignores the tile colors from afar').toBeLessThan(0.5)
+    const near = diff(await frame(magenta, true), await frame(green, true), 2)
+    expect(near.mean, 'close up the tiles show').toBeGreaterThan(20)
   })
 })
